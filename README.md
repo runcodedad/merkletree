@@ -40,9 +40,68 @@ Install-Package MerkleTree
 
 ```csharp
 using MerkleTree;
+using System.Text;
 
-// Example usage will be provided as the library develops
+// Create leaf data from your input
+var leafData = new List<byte[]>
+{
+    Encoding.UTF8.GetBytes("data1"),
+    Encoding.UTF8.GetBytes("data2"),
+    Encoding.UTF8.GetBytes("data3")
+};
+
+// Build the Merkle tree
+var tree = new MerkleTree(leafData);
+
+// Get the root hash
+byte[] rootHash = tree.GetRootHash();
+Console.WriteLine($"Root Hash: {Convert.ToHexString(rootHash)}");
+
+// Use a different hash algorithm (default is SHA256)
+var treeSHA512 = new MerkleTree(leafData, HashAlgorithmName.SHA512);
 ```
+
+## Tree Structure and Design
+
+This implementation provides a **binary Merkle tree** with support for **non-power-of-two leaf counts** using a **domain-separated padding strategy**.
+
+### Key Features
+
+#### Binary Tree Structure
+- **Leaves at Level 0**: Input data forms the bottom layer of the tree
+- **Parent nodes**: Computed as `Hash(left_child || right_child)`
+- **Left-to-right ordering**: Leaves are processed in the order provided
+- **Fully deterministic**: Same input always produces the same tree structure
+
+#### Non-Power-of-Two Support
+
+When the number of leaves (or nodes at any level) is odd, the tree uses a **domain-separated padding strategy**:
+
+1. The unpaired node becomes the **left child** of a parent node
+2. A **padding node** is created as the **right child**
+3. The padding hash is computed as: `Hash("MERKLE_PADDING" || unpaired_node_hash)`
+
+This approach ensures:
+- ✅ **Deterministic behavior**: Same input always produces same tree
+- ✅ **Security**: Padding cannot be confused with legitimate data
+- ✅ **Transparency**: Padding nodes are clearly distinguishable from data nodes
+
+**Example with 3 leaves:**
+```
+Level 2:          Root
+                 /    \
+Level 1:    H(L1||L2)  H(L3||Pad)
+           /    \      /    \
+Level 0:  L1    L2    L3   Pad
+```
+
+Where `Pad = Hash("MERKLE_PADDING" || L3)`
+
+#### Orientation Rules
+
+- **Leaf processing**: Left-to-right in the order provided in the input array
+- **Parent hash computation**: Always `Hash(left_child || right_child)`
+- **Unpaired nodes**: Become the left child, with padding as the right child
 
 ## Requirements
 
@@ -91,10 +150,16 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Version History
 
-### 1.0.0 (Initial Release)
+### 1.0.0 (Current Development)
 - Initial project setup
 - NuGet package configuration
 - Multi-targeting support (.NET 10.0 and .NET Standard 2.1)
+- **Merkle tree implementation with non-power-of-two leaf support**
+  - Binary tree structure with leaves at Level 0
+  - Domain-separated padding strategy for odd leaf counts
+  - Fully deterministic tree structure based on leaf ordering
+  - Support for multiple hash algorithms (SHA256, SHA384, SHA512, MD5, SHA1)
+  - Comprehensive test coverage (23+ tests)
 
 ## Support
 
