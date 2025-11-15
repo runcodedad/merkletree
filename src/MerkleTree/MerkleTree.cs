@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-
 namespace MerkleTree;
 
 /// <summary>
@@ -38,35 +36,51 @@ public class MerkleTree
 {
     private const string PaddingDomainSeparator = "MERKLE_PADDING";
     
+    private readonly IHashFunction _hashFunction;
+    
     /// <summary>
     /// Gets the root node of the Merkle tree.
     /// </summary>
     public MerkleTreeNode Root { get; }
     
     /// <summary>
-    /// Gets the hash algorithm used for computing node hashes.
+    /// Gets the hash function used for computing node hashes.
     /// </summary>
-    public HashAlgorithmName HashAlgorithm { get; }
+    public IHashFunction HashFunction => _hashFunction;
     
     /// <summary>
-    /// Initializes a new instance of the <see cref="MerkleTree"/> class with the specified leaf data.
+    /// Initializes a new instance of the <see cref="MerkleTree"/> class with the specified leaf data using SHA-256.
     /// </summary>
     /// <param name="leafData">The data for each leaf node. Must contain at least one element.</param>
-    /// <param name="hashAlgorithm">The hash algorithm to use. Defaults to SHA256.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="leafData"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="leafData"/> is empty.</exception>
-    public MerkleTree(IEnumerable<byte[]> leafData, HashAlgorithmName? hashAlgorithm = null)
+    public MerkleTree(IEnumerable<byte[]> leafData)
+        : this(leafData, new Sha256HashFunction())
+    {
+    }
+    
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MerkleTree"/> class with the specified leaf data and hash function.
+    /// </summary>
+    /// <param name="leafData">The data for each leaf node. Must contain at least one element.</param>
+    /// <param name="hashFunction">The hash function to use.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="leafData"/> or <paramref name="hashFunction"/> is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="leafData"/> is empty.</exception>
+    public MerkleTree(IEnumerable<byte[]> leafData, IHashFunction hashFunction)
     {
         if (leafData == null)
             throw new ArgumentNullException(nameof(leafData));
+        if (hashFunction == null)
+            throw new ArgumentNullException(nameof(hashFunction));
         
         var leafList = leafData.ToList();
         if (leafList.Count == 0)
             throw new ArgumentException("Leaf data must contain at least one element.", nameof(leafData));
         
-        HashAlgorithm = hashAlgorithm ?? HashAlgorithmName.SHA256;
+        _hashFunction = hashFunction;
         Root = BuildTree(leafList);
     }
+
     
     /// <summary>
     /// Builds the Merkle tree from the provided leaf data.
@@ -142,14 +156,13 @@ public class MerkleTree
     }
     
     /// <summary>
-    /// Computes the hash of the given data using the configured hash algorithm.
+    /// Computes the hash of the given data using the configured hash function.
     /// </summary>
     /// <param name="data">The data to hash.</param>
     /// <returns>The computed hash.</returns>
     private byte[] ComputeHash(byte[] data)
     {
-        using var hasher = CreateHashAlgorithm();
-        return hasher.ComputeHash(data);
+        return _hashFunction.ComputeHash(data);
     }
     
     /// <summary>
@@ -162,28 +175,6 @@ public class MerkleTree
     {
         var combinedHash = leftHash.Concat(rightHash).ToArray();
         return ComputeHash(combinedHash);
-    }
-    
-    /// <summary>
-    /// Creates an instance of the hash algorithm specified by <see cref="HashAlgorithm"/>.
-    /// </summary>
-    /// <returns>A hash algorithm instance.</returns>
-    private System.Security.Cryptography.HashAlgorithm CreateHashAlgorithm()
-    {
-        if (HashAlgorithm == HashAlgorithmName.SHA256)
-            return SHA256.Create();
-        else if (HashAlgorithm == HashAlgorithmName.SHA384)
-            return SHA384.Create();
-        else if (HashAlgorithm == HashAlgorithmName.SHA512)
-            return SHA512.Create();
-        else if (HashAlgorithm == HashAlgorithmName.MD5)
-            return MD5.Create();
-        else if (HashAlgorithm == HashAlgorithmName.SHA1)
-#pragma warning disable CA5350 // Do Not Use Weak Cryptographic Algorithms - user choice
-            return SHA1.Create();
-#pragma warning restore CA5350
-        else
-            throw new NotSupportedException($"Hash algorithm '{HashAlgorithm.Name}' is not supported.");
     }
     
     /// <summary>
