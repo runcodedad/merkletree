@@ -6,7 +6,7 @@ namespace MerkleTree.Tests;
 /// <summary>
 /// Tests for the MerkleTreeBuilder class, focusing on streaming/chunked input support.
 /// </summary>
-public class MerkleTreeBuilderTests
+public class MerkleTreeStreamTests
 {
     /// <summary>
     /// Helper method to create leaf data from strings.
@@ -32,7 +32,7 @@ public class MerkleTreeBuilderTests
     public void Constructor_DefaultHashFunction_UsesSha256()
     {
         // Act
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         
         // Assert
         Assert.NotNull(builder.HashFunction);
@@ -46,7 +46,7 @@ public class MerkleTreeBuilderTests
         var hashFunction = new Sha512HashFunction();
         
         // Act
-        var builder = new MerkleTreeBuilder(hashFunction);
+        var builder = new MerkleTreeStream(hashFunction);
         
         // Assert
         Assert.Same(hashFunction, builder.HashFunction);
@@ -56,14 +56,14 @@ public class MerkleTreeBuilderTests
     public void Constructor_WithNullHashFunction_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new MerkleTreeBuilder(null!));
+        Assert.Throws<ArgumentNullException>(() => new MerkleTreeStream(null!));
     }
     
     [Fact]
     public void Build_WithNullLeafData_ThrowsArgumentNullException()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() => builder.Build(null!));
@@ -73,7 +73,7 @@ public class MerkleTreeBuilderTests
     public void Build_WithEmptyLeafData_ThrowsInvalidOperationException()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var emptyData = new List<byte[]>();
         
         // Act & Assert
@@ -84,7 +84,7 @@ public class MerkleTreeBuilderTests
     public void Build_WithSingleLeaf_ReturnsCorrectMetadata()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = CreateLeafData("leaf1");
         
         // Act
@@ -101,7 +101,7 @@ public class MerkleTreeBuilderTests
     public void Build_WithTwoLeaves_ReturnsCorrectMetadata()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = CreateLeafData("leaf1", "leaf2");
         
         // Act
@@ -118,7 +118,7 @@ public class MerkleTreeBuilderTests
     public void Build_WithThreeLeaves_ReturnsCorrectMetadata()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
         
         // Act
@@ -135,7 +135,7 @@ public class MerkleTreeBuilderTests
     public void Build_WithFourLeaves_ReturnsCorrectMetadata()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3", "leaf4");
         
         // Act
@@ -152,7 +152,7 @@ public class MerkleTreeBuilderTests
     public void Build_WithEightLeaves_ReturnsCorrectMetadata()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = CreateLeafData("l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8");
         
         // Act
@@ -179,7 +179,7 @@ public class MerkleTreeBuilderTests
     public void Build_WithVariousLeafCounts_ReturnsCorrectHeight(int leafCount, int expectedHeight)
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = Enumerable.Range(1, leafCount)
             .Select(i => Encoding.UTF8.GetBytes($"leaf{i}"))
             .ToList();
@@ -196,7 +196,7 @@ public class MerkleTreeBuilderTests
     public void Build_ProducesDeterministicResults()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
         
         // Act
@@ -213,7 +213,7 @@ public class MerkleTreeBuilderTests
     public void Build_MatchesOriginalMerkleTreeRootHash()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
         
         // Act
@@ -237,7 +237,7 @@ public class MerkleTreeBuilderTests
     public void Build_WithVariousLeafCounts_MatchesOriginalMerkleTree(int leafCount)
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = Enumerable.Range(1, leafCount)
             .Select(i => Encoding.UTF8.GetBytes($"leaf{i}"))
             .ToList();
@@ -255,7 +255,7 @@ public class MerkleTreeBuilderTests
     public async Task BuildAsync_WithNullLeafData_ThrowsArgumentNullException()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentNullException>(
@@ -266,7 +266,7 @@ public class MerkleTreeBuilderTests
     public async Task BuildAsync_WithEmptyLeafData_ThrowsInvalidOperationException()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         
         // Act & Assert
         await Assert.ThrowsAsync<InvalidOperationException>(
@@ -283,7 +283,7 @@ public class MerkleTreeBuilderTests
     public async Task BuildAsync_WithSingleLeaf_ReturnsCorrectMetadata()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = CreateAsyncLeafData("leaf1");
         
         // Act
@@ -300,7 +300,7 @@ public class MerkleTreeBuilderTests
     public async Task BuildAsync_WithMultipleLeaves_ReturnsCorrectMetadata()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = CreateAsyncLeafData("leaf1", "leaf2", "leaf3");
         
         // Act
@@ -317,7 +317,7 @@ public class MerkleTreeBuilderTests
     public async Task BuildAsync_MatchesSyncBuild()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafDataSync = CreateLeafData("leaf1", "leaf2", "leaf3");
         var leafDataAsync = CreateAsyncLeafData("leaf1", "leaf2", "leaf3");
         
@@ -335,7 +335,7 @@ public class MerkleTreeBuilderTests
     public async Task BuildAsync_MatchesOriginalMerkleTree()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafDataSync = CreateLeafData("leaf1", "leaf2", "leaf3");
         var leafDataAsync = CreateAsyncLeafData("leaf1", "leaf2", "leaf3");
         
@@ -352,7 +352,7 @@ public class MerkleTreeBuilderTests
     public void BuildInBatches_WithNullLeafData_ThrowsArgumentNullException()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() => builder.BuildInBatches(null!, 10));
@@ -362,7 +362,7 @@ public class MerkleTreeBuilderTests
     public void BuildInBatches_WithInvalidBatchSize_ThrowsArgumentException()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = CreateLeafData("leaf1");
         
         // Act & Assert
@@ -374,7 +374,7 @@ public class MerkleTreeBuilderTests
     public void BuildInBatches_WithEmptyLeafData_ThrowsInvalidOperationException()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var emptyData = new List<byte[]>();
         
         // Act & Assert
@@ -385,7 +385,7 @@ public class MerkleTreeBuilderTests
     public void BuildInBatches_WithVariousBatchSizes_ProducesSameResult()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = Enumerable.Range(1, 10)
             .Select(i => Encoding.UTF8.GetBytes($"leaf{i}"))
             .ToList();
@@ -406,7 +406,7 @@ public class MerkleTreeBuilderTests
     public void BuildInBatches_MatchesBuildWithoutBatching()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3", "leaf4", "leaf5");
         
         // Act
@@ -423,7 +423,7 @@ public class MerkleTreeBuilderTests
     public void BuildInBatches_WithLargeDataset_ProducesCorrectResult()
     {
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var largeLeafCount = 1000;
         var leafData = Enumerable.Range(1, largeLeafCount)
             .Select(i => Encoding.UTF8.GetBytes($"leaf{i}"))
@@ -446,8 +446,8 @@ public class MerkleTreeBuilderTests
     public void Build_WithDifferentHashFunctions_ProducesDifferentResults()
     {
         // Arrange
-        var builder256 = new MerkleTreeBuilder(new Sha256HashFunction());
-        var builder512 = new MerkleTreeBuilder(new Sha512HashFunction());
+        var builder256 = new MerkleTreeStream(new Sha256HashFunction());
+        var builder512 = new MerkleTreeStream(new Sha512HashFunction());
         var leafData = CreateLeafData("leaf1", "leaf2");
         
         // Act
@@ -466,7 +466,7 @@ public class MerkleTreeBuilderTests
         // that would throw if the entire sequence was materialized
         
         // Arrange
-        var builder = new MerkleTreeBuilder();
+        var builder = new MerkleTreeStream();
         var maxAllowedMaterialization = 100;
         var leafData = GenerateStreamingLeaves(1000, maxAllowedMaterialization);
         

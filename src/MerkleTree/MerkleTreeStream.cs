@@ -15,35 +15,29 @@ namespace MerkleTree;
 /// </list>
 /// <para>
 /// The builder uses the same padding strategy as <see cref="MerkleTree"/> for deterministic results.
+/// Unlike <see cref="MerkleTree"/>, this class returns only metadata (root hash, height, leaf count) 
+/// without building the full tree structure, making it memory-efficient for large datasets.
 /// </para>
 /// </remarks>
-public class MerkleTreeBuilder
+public class MerkleTreeStream : MerkleTreeBase
 {
-    private const string PaddingDomainSeparator = "MERKLE_PADDING";
-    
-    private readonly IHashFunction _hashFunction;
     
     /// <summary>
-    /// Gets the hash function used for computing node hashes.
+    /// Initializes a new instance of the <see cref="MerkleTreeStream"/> class using SHA-256.
     /// </summary>
-    public IHashFunction HashFunction => _hashFunction;
-    
-    /// <summary>
-    /// Initializes a new instance of the <see cref="MerkleTreeBuilder"/> class using SHA-256.
-    /// </summary>
-    public MerkleTreeBuilder()
+    public MerkleTreeStream()
         : this(new Sha256HashFunction())
     {
     }
     
     /// <summary>
-    /// Initializes a new instance of the <see cref="MerkleTreeBuilder"/> class with the specified hash function.
+    /// Initializes a new instance of the <see cref="MerkleTreeStream"/> class with the specified hash function.
     /// </summary>
     /// <param name="hashFunction">The hash function to use.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="hashFunction"/> is null.</exception>
-    public MerkleTreeBuilder(IHashFunction hashFunction)
+    public MerkleTreeStream(IHashFunction hashFunction)
+        : base(hashFunction)
     {
-        _hashFunction = hashFunction ?? throw new ArgumentNullException(nameof(hashFunction));
     }
     
     /// <summary>
@@ -260,30 +254,4 @@ public class MerkleTreeBuilder
         return nextLevel;
     }
     
-    /// <summary>
-    /// Creates a padding hash for an unpaired node using domain-separated hashing.
-    /// </summary>
-    private byte[] CreatePaddingHash(byte[] unpairedHash)
-    {
-        // Compute padding hash as Hash("MERKLE_PADDING" || unpaired_hash)
-        var domainSeparatorBytes = System.Text.Encoding.UTF8.GetBytes(PaddingDomainSeparator);
-        return ComputeParentHash(domainSeparatorBytes, unpairedHash);
-    }
-    
-    /// <summary>
-    /// Computes the hash of the given data using the configured hash function.
-    /// </summary>
-    private byte[] ComputeHash(byte[] data)
-    {
-        return _hashFunction.ComputeHash(data);
-    }
-    
-    /// <summary>
-    /// Computes the parent hash from two child hashes: Hash(left || right).
-    /// </summary>
-    private byte[] ComputeParentHash(byte[] leftHash, byte[] rightHash)
-    {
-        var combinedHash = leftHash.Concat(rightHash).ToArray();
-        return ComputeHash(combinedHash);
-    }
 }

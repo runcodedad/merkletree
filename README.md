@@ -143,7 +143,7 @@ Where `Pad = Hash("MERKLE_PADDING" || L3)`
 
 ## Streaming Support
 
-The library includes a `MerkleTreeBuilder` class designed for processing large datasets that exceed available memory:
+The library includes a `MerkleTreeStream` class designed for processing large datasets that exceed available memory:
 
 ### Features
 
@@ -163,7 +163,7 @@ The library includes a `MerkleTreeBuilder` class designed for processing large d
 ### Example: Processing a Large File
 
 ```csharp
-var builder = new MerkleTreeBuilder();
+var builder = new MerkleTreeStream();
 
 // Read fixed-size records from file
 IEnumerable<byte[]> ReadRecordsFromFile(string path, int recordSize)
@@ -192,6 +192,8 @@ The `MerkleTreeMetadata` class provides information about the constructed tree:
 - **RootHash**: The Merkle root hash
 - **Height**: The height of the tree (0 for single leaf, 1 for two leaves, etc.)
 - **LeafCount**: The total number of leaves processed
+
+For more details and examples, see [docs/STREAMING.md](docs/STREAMING.md).
 
 ## Requirements
 

@@ -4,14 +4,14 @@ This document describes the streaming/chunked input implementation for building 
 
 ## Overview
 
-The `MerkleTreeBuilder` class enables building Merkle trees from datasets that exceed available memory by processing data incrementally through streaming and batch processing.
+The `MerkleTreeStream` class enables building Merkle trees from datasets that exceed available memory by processing data incrementally through streaming and batch processing.
 
 ## Key Features
 
 ### 1. Multiple Input Methods
 
 ```csharp
-var builder = new MerkleTreeBuilder();
+var builder = new MerkleTreeStream();
 
 // Synchronous streaming
 var metadata1 = builder.Build(IEnumerable<byte[]> leaves);
@@ -38,7 +38,7 @@ The streaming builder produces identical root hashes to the in-memory `MerkleTre
 var leafData = GetLeaves();
 
 // Streaming approach
-var builder = new MerkleTreeBuilder();
+var builder = new MerkleTreeStream();
 var streamingMetadata = builder.Build(leafData);
 
 // In-memory approach
@@ -97,7 +97,7 @@ IEnumerable<byte[]> ReadFileRecords(string path, int recordSize)
     }
 }
 
-var builder = new MerkleTreeBuilder();
+var builder = new MerkleTreeStream();
 var records = ReadFileRecords("large_data.bin", 32);
 var metadata = builder.BuildInBatches(records, batchSize: 1000);
 ```
@@ -119,7 +119,7 @@ async IAsyncEnumerable<byte[]> StreamDatabaseRecords(DbConnection conn)
     }
 }
 
-var builder = new MerkleTreeBuilder();
+var builder = new MerkleTreeStream();
 var records = StreamDatabaseRecords(connection);
 var metadata = await builder.BuildAsync(records);
 ```
@@ -139,7 +139,7 @@ async IAsyncEnumerable<byte[]> StreamNetworkData(Stream networkStream)
     }
 }
 
-var builder = new MerkleTreeBuilder();
+var builder = new MerkleTreeStream();
 var data = StreamNetworkData(stream);
 var metadata = await builder.BuildAsync(data);
 ```
@@ -149,7 +149,7 @@ var metadata = await builder.BuildAsync(data);
 ### Memory Usage
 
 - **In-Memory `MerkleTree`**: O(n) where n is total leaf count
-- **Streaming `MerkleTreeBuilder`**: O(h × b) where:
+- **Streaming `MerkleTreeStream`**: O(h × b) where:
   - h = tree height
   - b = batch size (for batch processing) or nodes per level
 
@@ -185,14 +185,14 @@ All tests verify that streaming produces identical results to the in-memory impl
 
 ## API Reference
 
-### MerkleTreeBuilder
+### MerkleTreeStream
 
 ```csharp
-public class MerkleTreeBuilder
+public class MerkleTreeStream
 {
     // Constructor
-    public MerkleTreeBuilder()
-    public MerkleTreeBuilder(IHashFunction hashFunction)
+    public MerkleTreeStream()
+    public MerkleTreeStream(IHashFunction hashFunction)
     
     // Properties
     public IHashFunction HashFunction { get; }
