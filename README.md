@@ -348,6 +348,8 @@ var metadata = await builder.BuildAsync(asyncLeafData);
 var proof = await builder.GenerateProofAsync(ReadLargeDatasetAsync(), leafIndex: 1000);
 ```
 
+**Performance Note**: The streaming proof generation is optimized to compute only O(log n) hashes along the path from the leaf to the root, rather than rebuilding the entire tree. This makes it efficient even for very large datasets.
+
 ### Use Cases
 
 - **Inclusion proofs**: Prove that data exists in a Merkle tree without revealing other data

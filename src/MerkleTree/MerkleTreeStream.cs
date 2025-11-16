@@ -268,8 +268,9 @@ public class MerkleTreeStream : MerkleTreeBase
     /// <exception cref="InvalidOperationException">Thrown when no leaves are provided.</exception>
     /// <remarks>
     /// <para>
-    /// This method rebuilds the tree structure incrementally to generate the proof.
-    /// The leaf data must be provided again since the streaming builder doesn't store the full tree.
+    /// This method computes only the necessary hashes along the path from the leaf to the root,
+    /// making it memory-efficient for large datasets. The leaf data must be provided again since
+    /// the streaming builder doesn't store the full tree.
     /// </para>
     /// <para>
     /// The proof contains the leaf value, its index, the tree height, and all sibling hashes
@@ -281,7 +282,7 @@ public class MerkleTreeStream : MerkleTreeBase
         if (leafData == null)
             throw new ArgumentNullException(nameof(leafData));
 
-        // Convert to list to allow indexing and counting
+        // Convert to list only once for counting and indexing
         var leafList = leafData.ToList();
 
         if (leafList.Count == 0)
@@ -304,25 +305,18 @@ public class MerkleTreeStream : MerkleTreeBase
                 Array.Empty<bool>());
         }
 
-        // Build Level 0 (leaf hashes)
-        var currentLevel = leafList.Select(leaf => ComputeHash(leaf)).ToList();
-        
-        // Calculate tree height first
-        int height = 0;
-        var tempLevel = new List<byte[]>(currentLevel);
-        while (tempLevel.Count > 1)
-        {
-            tempLevel = BuildNextLevel(tempLevel);
-            height++;
-        }
+        // Calculate tree height without building the tree
+        int height = CalculateTreeHeight(leafList.Count);
 
         var siblingHashes = new List<byte[]>();
         var siblingIsRight = new List<bool>();
+        var cache = new Dictionary<(int, long), byte[]>();
 
         // Start at the leaf level and work our way up
-        var currentIndex = leafIndex;
+        long currentIndex = leafIndex;
+        long currentLevelSize = leafList.Count;
 
-        // Traverse from leaf to root
+        // Traverse from leaf to root, computing only necessary hashes
         for (int level = 0; level < height; level++)
         {
             // Determine if current node is on left or right
@@ -343,18 +337,18 @@ public class MerkleTreeStream : MerkleTreeBase
                 siblingOnRight = false;
             }
 
-            // Get the sibling hash
+            // Compute sibling hash on-demand
             byte[] siblingHash;
-            if (siblingIndex < currentLevel.Count)
+            if (siblingIndex < currentLevelSize)
             {
-                // Sibling exists in the tree
-                siblingHash = currentLevel[(int)siblingIndex];
+                // Sibling exists - compute its hash
+                siblingHash = ComputeHashAtPosition(leafList, level, siblingIndex, cache);
             }
             else
             {
-                // No sibling exists - this means we have an odd number of nodes
-                // The sibling is a padding hash
-                siblingHash = CreatePaddingHash(currentLevel[(int)currentIndex]);
+                // No sibling exists - create padding hash
+                var currentHash = ComputeHashAtPosition(leafList, level, currentIndex, cache);
+                siblingHash = CreatePaddingHash(currentHash);
             }
 
             siblingHashes.Add(siblingHash);
@@ -362,12 +356,7 @@ public class MerkleTreeStream : MerkleTreeBase
 
             // Move to parent level
             currentIndex = currentIndex / 2;
-
-            // Build the next level to continue traversal
-            if (level < height - 1)
-            {
-                currentLevel = BuildNextLevel(currentLevel);
-            }
+            currentLevelSize = (currentLevelSize + 1) / 2; // Ceiling division
         }
 
         return new MerkleProof(
@@ -376,6 +365,87 @@ public class MerkleTreeStream : MerkleTreeBase
             height,
             siblingHashes.ToArray(),
             siblingIsRight.ToArray());
+    }
+
+    /// <summary>
+    /// Calculates the height of a tree with the given number of leaves.
+    /// </summary>
+    private static int CalculateTreeHeight(long leafCount)
+    {
+        if (leafCount <= 1)
+            return 0;
+
+        int height = 0;
+        long currentLevelSize = leafCount;
+        
+        while (currentLevelSize > 1)
+        {
+            currentLevelSize = (currentLevelSize + 1) / 2; // Ceiling division
+            height++;
+        }
+
+        return height;
+    }
+
+    /// <summary>
+    /// Computes the hash at a specific position in a specific level of the tree.
+    /// Uses memoization to avoid recomputing hashes.
+    /// </summary>
+    private byte[] ComputeHashAtPosition(List<byte[]> leafList, int level, long index, Dictionary<(int, long), byte[]>? cache = null)
+    {
+        cache ??= new Dictionary<(int, long), byte[]>();
+        
+        var key = (level, index);
+        if (cache.TryGetValue(key, out var cachedHash))
+        {
+            return cachedHash;
+        }
+
+        byte[] hash;
+        
+        // At level 0, just hash the leaf
+        if (level == 0)
+        {
+            hash = ComputeHash(leafList[(int)index]);
+        }
+        else
+        {
+            // For higher levels, recursively compute from children
+            long leftChildIndex = index * 2;
+            long rightChildIndex = index * 2 + 1;
+            long childrenLevelSize = GetLevelSize(leafList.Count, level - 1);
+
+            var leftHash = ComputeHashAtPosition(leafList, level - 1, leftChildIndex, cache);
+            
+            byte[] rightHash;
+            if (rightChildIndex < childrenLevelSize)
+            {
+                rightHash = ComputeHashAtPosition(leafList, level - 1, rightChildIndex, cache);
+            }
+            else
+            {
+                // No right child - use padding
+                rightHash = CreatePaddingHash(leftHash);
+            }
+
+            hash = ComputeParentHash(leftHash, rightHash);
+        }
+
+        cache[key] = hash;
+        return hash;
+    }
+
+    /// <summary>
+    /// Gets the number of nodes at a specific level.
+    /// </summary>
+    private static long GetLevelSize(long leafCount, int level)
+    {
+        long size = leafCount;
+        for (int i = 0; i < level; i++)
+        {
+            size = (size + 1) / 2; // Ceiling division
+        }
+        return size;
     }
 
     /// <summary>
@@ -390,8 +460,9 @@ public class MerkleTreeStream : MerkleTreeBase
     /// <exception cref="InvalidOperationException">Thrown when no leaves are provided.</exception>
     /// <remarks>
     /// <para>
-    /// This method rebuilds the tree structure incrementally to generate the proof.
-    /// The leaf data must be provided again since the streaming builder doesn't store the full tree.
+    /// This method computes only the necessary hashes along the path from the leaf to the root,
+    /// making it memory-efficient for large datasets. The leaf data must be provided again since
+    /// the streaming builder doesn't store the full tree.
     /// </para>
     /// <para>
     /// The proof contains the leaf value, its index, the tree height, and all sibling hashes
@@ -433,78 +504,9 @@ public class MerkleTreeStream : MerkleTreeBase
                 Array.Empty<bool>());
         }
 
-        // Build Level 0 (leaf hashes)
-        var currentLevel = leafList.Select(leaf => ComputeHash(leaf)).ToList();
-        
-        // Calculate tree height first
-        int height = 0;
-        var tempLevel = new List<byte[]>(currentLevel);
-        while (tempLevel.Count > 1)
-        {
-            tempLevel = BuildNextLevel(tempLevel);
-            height++;
-        }
-
-        var siblingHashes = new List<byte[]>();
-        var siblingIsRight = new List<bool>();
-
-        // Start at the leaf level and work our way up
-        var currentIndex = leafIndex;
-
-        // Traverse from leaf to root
-        for (int level = 0; level < height; level++)
-        {
-            // Determine if current node is on left or right
-            bool isLeftChild = currentIndex % 2 == 0;
-            long siblingIndex;
-            bool siblingOnRight;
-
-            if (isLeftChild)
-            {
-                // Current node is left child, sibling is on the right
-                siblingIndex = currentIndex + 1;
-                siblingOnRight = true;
-            }
-            else
-            {
-                // Current node is right child, sibling is on the left
-                siblingIndex = currentIndex - 1;
-                siblingOnRight = false;
-            }
-
-            // Get the sibling hash
-            byte[] siblingHash;
-            if (siblingIndex < currentLevel.Count)
-            {
-                // Sibling exists in the tree
-                siblingHash = currentLevel[(int)siblingIndex];
-            }
-            else
-            {
-                // No sibling exists - this means we have an odd number of nodes
-                // The sibling is a padding hash
-                siblingHash = CreatePaddingHash(currentLevel[(int)currentIndex]);
-            }
-
-            siblingHashes.Add(siblingHash);
-            siblingIsRight.Add(siblingOnRight);
-
-            // Move to parent level
-            currentIndex = currentIndex / 2;
-
-            // Build the next level to continue traversal
-            if (level < height - 1)
-            {
-                currentLevel = BuildNextLevel(currentLevel);
-            }
-        }
-
-        return new MerkleProof(
-            leafList[(int)leafIndex],
-            leafIndex,
-            height,
-            siblingHashes.ToArray(),
-            siblingIsRight.ToArray());
+        // Use the synchronous implementation since we already have the list
+        // This reuses the optimized logic that only computes necessary hashes
+        return GenerateProof(leafList, leafIndex);
     }
 
 }
