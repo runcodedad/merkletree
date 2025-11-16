@@ -125,13 +125,13 @@ public class RootSerializationTests
 
         // Assert - SHA-256 produces 32 bytes
         Assert.Equal(32, serializedSha256.Length);
-        
+
         // Assert - SHA-512 produces 64 bytes
         Assert.Equal(64, serializedSha512.Length);
-        
+
         // Assert - BLAKE3 produces 32 bytes
         Assert.Equal(32, serializedBlake3.Length);
-        
+
         // Assert - SHA-256 and SHA-512 produce different hashes
         Assert.NotEqual(serializedSha256.Length, serializedSha512.Length);
     }
@@ -198,7 +198,7 @@ public class RootSerializationTests
 
         // Act
         var deserialized = MerkleTreeNode.Deserialize(originalHash);
-        
+
         // Modify the deserialized node's hash
         deserialized.Hash![0] = (byte)(deserialized.Hash[0] ^ 0xFF);
 

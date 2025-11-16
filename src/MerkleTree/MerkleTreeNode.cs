@@ -55,7 +55,7 @@ public class MerkleTreeNode
         {
             throw new InvalidOperationException("Cannot serialize a node with a null hash.");
         }
-        
+
         return Hash;
     }
 
@@ -76,12 +76,12 @@ public class MerkleTreeNode
         {
             throw new ArgumentNullException(nameof(data), "Cannot deserialize from null data.");
         }
-        
+
         if (data.Length == 0)
         {
             throw new ArgumentException("Cannot deserialize from empty data.", nameof(data));
         }
-        
+
         // Create a new node with a copy of the hash data
         return new MerkleTreeNode(data.ToArray());
     }

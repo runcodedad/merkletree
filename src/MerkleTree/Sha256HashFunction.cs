@@ -22,10 +22,10 @@ public class Sha256HashFunction : IHashFunction
 {
     /// <inheritdoc/>
     public string Name => "SHA-256";
-    
+
     /// <inheritdoc/>
     public int HashSizeInBytes => 32;
-    
+
     /// <inheritdoc/>
     public byte[] ComputeHash(byte[] data)
     {

@@ -13,7 +13,7 @@ public class MerkleTreeMetadata
     /// Gets the root node of the Merkle tree.
     /// </summary>
     public MerkleTreeNode Root { get; }
-    
+
     /// <summary>
     /// Gets the root hash of the Merkle tree.
     /// </summary>
@@ -21,7 +21,7 @@ public class MerkleTreeMetadata
     /// This is a convenience property that returns the hash from the Root node.
     /// </remarks>
     public byte[] RootHash => Root.Hash ?? Array.Empty<byte>();
-    
+
     /// <summary>
     /// Gets the height of the Merkle tree.
     /// </summary>
@@ -30,12 +30,12 @@ public class MerkleTreeMetadata
     /// A single leaf has height 0, two leaves have height 1, etc.
     /// </remarks>
     public int Height { get; }
-    
+
     /// <summary>
     /// Gets the number of leaves in the Merkle tree.
     /// </summary>
     public long LeafCount { get; }
-    
+
     /// <summary>
     /// Initializes a new instance of the <see cref="MerkleTreeMetadata"/> class.
     /// </summary>
