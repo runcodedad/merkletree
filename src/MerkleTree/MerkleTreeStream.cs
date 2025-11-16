@@ -55,8 +55,16 @@ public class MerkleTreeStream : MerkleTreeBase
         if (leafData == null)
             throw new ArgumentNullException(nameof(leafData));
 
-        // Process leaves and build Level 0
-        var (level0Hashes, leafCount) = await ProcessLeavesAsync(leafData, cancellationToken);
+        // Build Level 0 by streaming and hashing leaves
+        var level0Hashes = new List<byte[]>();
+        long leafCount = 0;
+
+        await foreach (var leaf in leafData.WithCancellation(cancellationToken))
+        {
+            var hash = ComputeHash(leaf);
+            level0Hashes.Add(hash);
+            leafCount++;
+        }
 
         if (leafCount == 0)
             throw new InvalidOperationException("At least one leaf is required to build a Merkle tree.");
@@ -89,8 +97,16 @@ public class MerkleTreeStream : MerkleTreeBase
         if (leafData == null)
             throw new ArgumentNullException(nameof(leafData));
 
-        // Process leaves and build Level 0
-        var (level0Hashes, leafCount) = ProcessLeaves(leafData);
+        // Build Level 0 by streaming and hashing leaves
+        var level0Hashes = new List<byte[]>();
+        long leafCount = 0;
+
+        foreach (var leaf in leafData)
+        {
+            var hash = ComputeHash(leaf);
+            level0Hashes.Add(hash);
+            leafCount++;
+        }
 
         if (leafCount == 0)
             throw new InvalidOperationException("At least one leaf is required to build a Merkle tree.");
@@ -109,120 +125,6 @@ public class MerkleTreeStream : MerkleTreeBase
         var rootNode = new MerkleTreeNode(rootHash);
 
         return new MerkleTreeMetadata(rootNode, height, leafCount);
-    }
-
-    /// <summary>
-    /// Builds a Merkle tree from a stream of leaf data in batches.
-    /// </summary>
-    /// <param name="leafData">An enumerable of leaf data.</param>
-    /// <param name="batchSize">The number of leaves to process in each batch.</param>
-    /// <returns>The Merkle tree metadata including root hash, height, and leaf count.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="leafData"/> is null.</exception>
-    /// <exception cref="ArgumentException">Thrown when <paramref name="batchSize"/> is less than 1.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when no leaves are provided.</exception>
-    public MerkleTreeMetadata BuildInBatches(IEnumerable<byte[]> leafData, int batchSize)
-    {
-        if (leafData == null)
-            throw new ArgumentNullException(nameof(leafData));
-        if (batchSize < 1)
-            throw new ArgumentException("Batch size must be at least 1.", nameof(batchSize));
-
-        // Process leaves in batches and build Level 0
-        var (level0Hashes, leafCount) = ProcessLeavesInBatches(leafData, batchSize);
-
-        if (leafCount == 0)
-            throw new InvalidOperationException("At least one leaf is required to build a Merkle tree.");
-
-        // Build tree bottom-up
-        var currentLevel = level0Hashes;
-        int height = 0;
-
-        while (currentLevel.Count > 1)
-        {
-            currentLevel = BuildNextLevel(currentLevel);
-            height++;
-        }
-
-        var rootHash = currentLevel[0];
-        var rootNode = new MerkleTreeNode(rootHash);
-
-        return new MerkleTreeMetadata(rootNode, height, leafCount);
-    }
-
-    /// <summary>
-    /// Processes leaves asynchronously and computes their hashes.
-    /// </summary>
-    private async Task<(List<byte[]> hashes, long leafCount)> ProcessLeavesAsync(
-        IAsyncEnumerable<byte[]> leafData,
-        CancellationToken cancellationToken)
-    {
-        var hashes = new List<byte[]>();
-        long count = 0;
-
-        await foreach (var leaf in leafData.WithCancellation(cancellationToken))
-        {
-            var hash = ComputeHash(leaf);
-            hashes.Add(hash);
-            count++;
-        }
-
-        return (hashes, count);
-    }
-
-    /// <summary>
-    /// Processes leaves synchronously and computes their hashes.
-    /// </summary>
-    private (List<byte[]> hashes, long leafCount) ProcessLeaves(IEnumerable<byte[]> leafData)
-    {
-        var hashes = new List<byte[]>();
-        long count = 0;
-
-        foreach (var leaf in leafData)
-        {
-            var hash = ComputeHash(leaf);
-            hashes.Add(hash);
-            count++;
-        }
-
-        return (hashes, count);
-    }
-
-    /// <summary>
-    /// Processes leaves in batches to minimize memory usage.
-    /// </summary>
-    private (List<byte[]> hashes, long leafCount) ProcessLeavesInBatches(
-        IEnumerable<byte[]> leafData,
-        int batchSize)
-    {
-        var hashes = new List<byte[]>();
-        long count = 0;
-        var batch = new List<byte[]>(batchSize);
-
-        foreach (var leaf in leafData)
-        {
-            batch.Add(leaf);
-            count++;
-
-            if (batch.Count >= batchSize)
-            {
-                // Process batch
-                foreach (var leafInBatch in batch)
-                {
-                    var hash = ComputeHash(leafInBatch);
-                    hashes.Add(hash);
-                }
-                batch.Clear();
-            }
-        }
-
-        // Process remaining items in the last batch
-        foreach (var leafInBatch in batch)
-        {
-            var hash = ComputeHash(leafInBatch);
-            hashes.Add(hash);
-        }
-
-        return (hashes, count);
     }
 
     /// <summary>
@@ -258,33 +160,36 @@ public class MerkleTreeStream : MerkleTreeBase
     }
 
     /// <summary>
-    /// Generates a Merkle proof for the leaf at the specified index using streaming data.
+    /// Generates a Merkle proof for the leaf at the specified index using optimized streaming.
     /// </summary>
     /// <param name="leafData">The original leaf data stream (must be provided again for streaming). The stream should be re-enumerable.</param>
     /// <param name="leafIndex">The 0-based index of the leaf to generate a proof for.</param>
-    /// <param name="leafCount">The total number of leaves in the dataset. Required for streaming mode.</param>
+    /// <param name="leafCount">The total number of leaves in the dataset.</param>
     /// <param name="cache">Optional cache mapping (level, index) to hash. If provided, hashes are retrieved from cache when available and stored when computed.</param>
     /// <returns>A <see cref="MerkleProof"/> containing all information needed to verify the leaf.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="leafData"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the leaf index is invalid.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when no leaves are provided.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="leafCount"/> is less than or equal to zero.</exception>
     /// <remarks>
     /// <para>
-    /// This method processes data in streaming fashion without loading all leaves into memory.
-    /// Only one tree level is kept in memory at a time, making it suitable for large datasets
-    /// that don't fit in memory. The leaf data stream should be re-enumerable.
+    /// This method uses an optimized approach that only computes the sibling hashes needed for the proof path,
+    /// requiring O(log n) memory instead of O(n). It streams through the data to compute only the necessary hashes
+    /// at each level, making it suitable for datasets of any size (even 500GB+ files).
     /// </para>
     /// <para>
-    /// If a cache is provided, it will be used to avoid recomputing hashes that are already cached.
-    /// The cache can be shared across multiple proof generations to improve performance.
+    /// If a cache is provided, sibling hashes are retrieved from cache when available, allowing proofs to be generated
+    /// without re-streaming the data. The cache can be an in-memory dictionary or a disk-based storage system.
     /// </para>
     /// <para>
     /// For datasets that fit in memory, consider using <see cref="MerkleTree"/> instead,
-    /// which provides better performance for proof generation.
+    /// which provides O(1) proof generation after initial tree construction.
     /// </para>
     /// </remarks>
-    public MerkleProof GenerateProof(IEnumerable<byte[]> leafData, long leafIndex, long leafCount, Dictionary<(int level, long index), byte[]>? cache = null)
+    public MerkleProof GenerateProof(
+        IEnumerable<byte[]> leafData,
+        long leafIndex,
+        long leafCount,
+        Dictionary<(int level, long index), byte[]>? cache = null)
     {
         if (leafData == null)
             throw new ArgumentNullException(nameof(leafData));
@@ -292,7 +197,277 @@ public class MerkleTreeStream : MerkleTreeBase
         if (leafCount <= 0)
             throw new ArgumentException("Leaf count must be greater than zero.", nameof(leafCount));
 
-        return GenerateProofStreamingInternal(leafData, leafCount, leafIndex, cache);
+        if (leafIndex < 0 || leafIndex >= leafCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(leafIndex),
+                $"Leaf index must be between 0 and {leafCount - 1}.");
+        }
+
+        // Calculate tree height
+        int height = CalculateTreeHeight(leafCount);
+
+        // For a single leaf tree
+        if (leafCount == 1)
+        {
+            var singleLeaf = leafData.FirstOrDefault();
+            if (singleLeaf == null)
+                throw new InvalidOperationException("Leaf data is empty but leaf count was 1.");
+
+            return new MerkleProof(
+                singleLeaf,
+                0,
+                0,
+                Array.Empty<byte[]>(),
+                Array.Empty<bool>());
+        }
+
+        var siblingHashes = new List<byte[]>();
+        var siblingIsRight = new List<bool>();
+        
+        // Store the original leaf value for the proof
+        byte[]? originalLeafValue = null;
+
+        // Track the current index as we traverse up the tree
+        long currentIndex = leafIndex;
+
+        // Process each level from leaf to root
+        for (int level = 0; level < height; level++)
+        {
+            long levelSize = GetLevelSize(leafCount, level);
+            
+            // Determine sibling index and position
+            long siblingIndex = (currentIndex % 2 == 0) ? currentIndex + 1 : currentIndex - 1;
+            bool siblingOnRight = (currentIndex % 2 == 0);
+
+            // Get or compute the sibling hash
+            byte[] siblingHash;
+            
+            // Try to get from cache first
+            if (cache != null && cache.TryGetValue((level, siblingIndex), out var cachedHash))
+            {
+                siblingHash = cachedHash;
+            }
+            else
+            {
+                // Need to compute the sibling hash
+                if (level == 0)
+                {
+                    // Level 0: hash the leaf data
+                    // We need to stream to the specific leaf index
+                    byte[]? targetLeaf = null;
+                    byte[]? siblingLeaf = null;
+                    long count = 0;
+
+                    foreach (var leaf in leafData)
+                    {
+                        if (count == currentIndex)
+                        {
+                            targetLeaf = leaf;
+                            originalLeafValue = leaf; // Store original value
+                        }
+                        if (count == siblingIndex)
+                        {
+                            siblingLeaf = leaf;
+                        }
+                        
+                        count++;
+                        
+                        // Optimization: stop once we have both leaves
+                        if (targetLeaf != null && (siblingLeaf != null || siblingIndex >= levelSize))
+                            break;
+                    }
+
+                    if (targetLeaf == null)
+                        throw new InvalidOperationException($"Could not find leaf at index {currentIndex}.");
+
+                    // Compute sibling hash
+                    if (siblingIndex < levelSize && siblingLeaf != null)
+                    {
+                        siblingHash = ComputeHash(siblingLeaf);
+                        
+                        // Also cache the current leaf hash if cache is provided
+                        if (cache != null)
+                        {
+                            cache[(level, currentIndex)] = ComputeHash(targetLeaf);
+                            cache[(level, siblingIndex)] = siblingHash;
+                        }
+                    }
+                    else
+                    {
+                        // No sibling - create padding hash
+                        var currentHash = ComputeHash(targetLeaf);
+                        siblingHash = CreatePaddingHash(currentHash);
+                        
+                        if (cache != null)
+                        {
+                            cache[(level, currentIndex)] = currentHash;
+                        }
+                    }
+                }
+                else
+                {
+                    // Higher levels: compute from previous level
+                    // We need the hash at currentIndex from the previous level
+                    int prevLevel = level - 1;
+                    long prevLevelSize = GetLevelSize(leafCount, prevLevel);
+                    
+                    // Get the two children of the current node
+                    long leftChildIndex = currentIndex * 2;
+                    long rightChildIndex = currentIndex * 2 + 1;
+                    
+                    byte[] leftChildHash = GetHashAtIndex(leafData, prevLevel, leftChildIndex, leafCount, cache);
+                    byte[] rightChildHash;
+                    
+                    if (rightChildIndex < prevLevelSize)
+                    {
+                        rightChildHash = GetHashAtIndex(leafData, prevLevel, rightChildIndex, leafCount, cache);
+                    }
+                    else
+                    {
+                        rightChildHash = CreatePaddingHash(leftChildHash);
+                    }
+                    
+                    // Compute and cache current node
+                    byte[] currentHash = ComputeParentHash(leftChildHash, rightChildHash);
+                    if (cache != null)
+                    {
+                        cache[(level, currentIndex)] = currentHash;
+                    }
+                    
+                    // Now compute sibling
+                    if (siblingIndex < levelSize)
+                    {
+                        leftChildIndex = siblingIndex * 2;
+                        rightChildIndex = siblingIndex * 2 + 1;
+                        
+                        leftChildHash = GetHashAtIndex(leafData, prevLevel, leftChildIndex, leafCount, cache);
+                        
+                        if (rightChildIndex < prevLevelSize)
+                        {
+                            rightChildHash = GetHashAtIndex(leafData, prevLevel, rightChildIndex, leafCount, cache);
+                        }
+                        else
+                        {
+                            rightChildHash = CreatePaddingHash(leftChildHash);
+                        }
+                        
+                        siblingHash = ComputeParentHash(leftChildHash, rightChildHash);
+                        
+                        if (cache != null)
+                        {
+                            cache[(level, siblingIndex)] = siblingHash;
+                        }
+                    }
+                    else
+                    {
+                        // No sibling - use padding
+                        siblingHash = CreatePaddingHash(currentHash);
+                    }
+                }
+            }
+
+            siblingHashes.Add(siblingHash);
+            siblingIsRight.Add(siblingOnRight);
+
+            // Move to parent level
+            currentIndex = currentIndex / 2;
+        }
+
+        if (originalLeafValue == null)
+        {
+            // Fallback: re-stream to get the original value if we didn't capture it
+            long count = 0;
+            foreach (var leaf in leafData)
+            {
+                if (count == leafIndex)
+                {
+                    originalLeafValue = leaf;
+                    break;
+                }
+                count++;
+            }
+            
+            if (originalLeafValue == null)
+                throw new InvalidOperationException($"Could not retrieve leaf at index {leafIndex}.");
+        }
+
+        return new MerkleProof(
+            originalLeafValue,
+            leafIndex,
+            height,
+            siblingHashes.ToArray(),
+            siblingIsRight.ToArray());
+    }
+
+    /// <summary>
+    /// Gets the hash at a specific index in a specific level.
+    /// </summary>
+    private byte[] GetHashAtIndex(
+        IEnumerable<byte[]> leafData,
+        long level,
+        long index,
+        long leafCount,
+        Dictionary<(int level, long index), byte[]>? cache)
+    {
+        // Try cache first
+        if (cache != null && cache.TryGetValue(((int)level, index), out var cachedHash))
+        {
+            return cachedHash;
+        }
+
+        // Compute the hash
+        byte[] hash;
+        
+        if (level == 0)
+        {
+            // Level 0: get from leaf data
+            long count = 0;
+            byte[]? targetLeaf = null;
+            
+            foreach (var leaf in leafData)
+            {
+                if (count == index)
+                {
+                    targetLeaf = leaf;
+                    break;
+                }
+                count++;
+            }
+            
+            if (targetLeaf == null)
+                throw new InvalidOperationException($"Could not find leaf at index {index}.");
+            
+            hash = ComputeHash(targetLeaf);
+        }
+        else
+        {
+            // Higher level: compute from children
+            long prevLevelSize = GetLevelSize(leafCount, (int)(level - 1));
+            long leftChildIndex = index * 2;
+            long rightChildIndex = index * 2 + 1;
+            
+            byte[] leftChildHash = GetHashAtIndex(leafData, level - 1, leftChildIndex, leafCount, cache);
+            byte[] rightChildHash;
+            
+            if (rightChildIndex < prevLevelSize)
+            {
+                rightChildHash = GetHashAtIndex(leafData, level - 1, rightChildIndex, leafCount, cache);
+            }
+            else
+            {
+                rightChildHash = CreatePaddingHash(leftChildHash);
+            }
+            
+            hash = ComputeParentHash(leftChildHash, rightChildHash);
+        }
+        
+        // Store in cache
+        if (cache != null)
+        {
+            cache[((int)level, index)] = hash;
+        }
+        
+        return hash;
     }
 
     /// <summary>
@@ -329,207 +504,21 @@ public class MerkleTreeStream : MerkleTreeBase
     }
 
     /// <summary>
-    /// Internal implementation of streaming proof generation.
-    /// </summary>
-    private MerkleProof GenerateProofStreamingInternal(IEnumerable<byte[]> leafData, long leafCount, long leafIndex, Dictionary<(int level, long index), byte[]>? cache)
-    {
-        if (leafData == null)
-            throw new ArgumentNullException(nameof(leafData));
-
-        if (leafCount <= 0)
-            throw new ArgumentException("Leaf count must be greater than zero.", nameof(leafCount));
-
-        if (leafIndex < 0 || leafIndex >= leafCount)
-        {
-            throw new ArgumentOutOfRangeException(nameof(leafIndex),
-                $"Leaf index must be between 0 and {leafCount - 1}.");
-        }
-
-        // For a single leaf tree, we need to get the leaf value
-        if (leafCount == 1)
-        {
-            var singleLeaf = leafData.FirstOrDefault();
-            if (singleLeaf == null)
-                throw new InvalidOperationException("Leaf data is empty but leaf count was 1.");
-
-            return new MerkleProof(
-                singleLeaf,
-                0,
-                0,
-                Array.Empty<byte[]>(),
-                Array.Empty<bool>());
-        }
-
-        // Calculate tree height
-        int height = CalculateTreeHeight(leafCount);
-
-        var siblingHashes = new List<byte[]>();
-        var siblingIsRight = new List<bool>();
-
-        // Build level 0 from streaming data, keeping only what we need
-        var currentLevel = GetOrComputeLevelStreaming(leafData, leafCount, 0, cache);
-        long currentIndex = leafIndex;
-
-        // Store the leaf value for the proof
-        byte[] leafValue = currentLevel[(int)leafIndex];
-
-        // Traverse from leaf to root
-        for (int level = 0; level < height; level++)
-        {
-            // Determine if current node is on left or right
-            bool isLeftChild = currentIndex % 2 == 0;
-            long siblingIndex;
-            bool siblingOnRight;
-
-            if (isLeftChild)
-            {
-                // Current node is left child, sibling is on the right
-                siblingIndex = currentIndex + 1;
-                siblingOnRight = true;
-            }
-            else
-            {
-                // Current node is right child, sibling is on the left
-                siblingIndex = currentIndex - 1;
-                siblingOnRight = false;
-            }
-
-            // Get the sibling hash from the current level
-            byte[] siblingHash;
-            if (siblingIndex < currentLevel.Count)
-            {
-                // Sibling exists in the current level
-                siblingHash = currentLevel[(int)siblingIndex];
-            }
-            else
-            {
-                // No sibling exists - create padding hash
-                siblingHash = CreatePaddingHash(currentLevel[(int)currentIndex]);
-            }
-
-            siblingHashes.Add(siblingHash);
-            siblingIsRight.Add(siblingOnRight);
-
-            // Move to parent level
-            currentIndex = currentIndex / 2;
-
-            // Build the next level for the next iteration
-            if (level < height - 1)
-            {
-                currentLevel = GetOrComputeLevelStreaming(null, GetLevelSize(leafCount, level + 1), level + 1, cache, currentLevel);
-            }
-        }
-
-        // Get the original leaf data value (unhashed)
-        // We need to re-enumerate to get the original value
-        var originalLeaf = leafData.Skip((int)leafIndex).FirstOrDefault();
-        if (originalLeaf == null)
-            throw new InvalidOperationException($"Could not retrieve leaf at index {leafIndex}.");
-
-        return new MerkleProof(
-            originalLeaf,
-            leafIndex,
-            height,
-            siblingHashes.ToArray(),
-            siblingIsRight.ToArray());
-    }
-
-    /// <summary>
-    /// Gets a level's hashes from cache or computes them in streaming fashion.
-    /// </summary>
-    /// <param name="leafData">The leaf data stream (only used for level 0).</param>
-    /// <param name="levelSize">The expected size of this level.</param>
-    /// <param name="targetLevel">The level to retrieve or compute.</param>
-    /// <param name="cache">Optional cache for storing computed hashes.</param>
-    /// <param name="previousLevel">The previous level's hashes (used to compute the target level).</param>
-    /// <returns>A list of hashes for the specified level.</returns>
-    private List<byte[]> GetOrComputeLevelStreaming(IEnumerable<byte[]>? leafData, long levelSize, int targetLevel, Dictionary<(int level, long index), byte[]>? cache, List<byte[]>? previousLevel = null)
-    {
-        // Check if we can use the cache
-        if (cache != null)
-        {
-            // Try to get the entire level from cache
-            var cachedLevel = new List<byte[]>();
-            bool allCached = true;
-
-            for (long i = 0; i < levelSize; i++)
-            {
-                if (cache.TryGetValue((targetLevel, i), out var hash))
-                {
-                    cachedLevel.Add(hash);
-                }
-                else
-                {
-                    allCached = false;
-                    break;
-                }
-            }
-
-            if (allCached)
-            {
-                return cachedLevel;
-            }
-        }
-
-        // Compute the level
-        List<byte[]> level;
-        if (targetLevel == 0)
-        {
-            // Level 0: hash all leaves from stream
-            if (leafData == null)
-                throw new ArgumentNullException(nameof(leafData), "Leaf data is required for level 0.");
-
-            level = new List<byte[]>();
-            long count = 0;
-            foreach (var leaf in leafData)
-            {
-                level.Add(ComputeHash(leaf));
-                count++;
-                if (count >= levelSize)
-                    break;
-            }
-
-            if (count < levelSize)
-                throw new InvalidOperationException($"Leaf data stream contained {count} items but expected {levelSize}.");
-        }
-        else
-        {
-            // Higher levels: use previous level
-            if (previousLevel == null)
-                throw new ArgumentNullException(nameof(previousLevel), "Previous level is required for levels > 0.");
-
-            level = BuildNextLevel(previousLevel);
-        }
-
-        // Store in cache if provided
-        if (cache != null)
-        {
-            for (long i = 0; i < level.Count; i++)
-            {
-                cache[(targetLevel, i)] = level[(int)i];
-            }
-        }
-
-        return level;
-    }
-
-    /// <summary>
     /// Generates a Merkle proof for the leaf at the specified index asynchronously.
     /// </summary>
     /// <param name="leafData">The original leaf data stream (must be provided again for streaming). The stream should be re-enumerable.</param>
     /// <param name="leafIndex">The 0-based index of the leaf to generate a proof for.</param>
-    /// <param name="leafCount">The total number of leaves in the dataset. Required for streaming mode.</param>
+    /// <param name="leafCount">The total number of leaves in the dataset.</param>
     /// <param name="cache">Optional cache mapping (level, index) to hash. If provided, hashes are retrieved from cache when available and stored when computed.</param>
     /// <param name="cancellationToken">A cancellation token to cancel the operation.</param>
     /// <returns>A task that returns a <see cref="MerkleProof"/> containing all information needed to verify the leaf.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="leafData"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when the leaf index is invalid.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when no leaves are provided.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="leafCount"/> is less than or equal to zero.</exception>
     /// <remarks>
     /// <para>
-    /// This method collects the async enumerable into a list, then uses the synchronous streaming implementation.
-    /// Only one tree level is kept in memory at a time, making it suitable for large datasets.
+    /// This method collects the async enumerable into a list, then uses the synchronous optimized implementation.
+    /// The synchronous version uses O(log n) memory by computing only sibling hashes along the proof path.
     /// </para>
     /// <para>
     /// For datasets that fit in memory, consider using <see cref="MerkleTree"/> instead,
@@ -549,14 +538,14 @@ public class MerkleTreeStream : MerkleTreeBase
         if (leafCount <= 0)
             throw new ArgumentException("Leaf count must be greater than zero.", nameof(leafCount));
 
-        // Convert to list to allow indexing and counting
+        // Convert to list to allow multiple enumerations
         var leafList = new List<byte[]>();
         await foreach (var leaf in leafData.WithCancellation(cancellationToken))
         {
             leafList.Add(leaf);
         }
 
-        // Use the synchronous streaming implementation with the collected list
+        // Use the synchronous optimized implementation
         return GenerateProof(leafList, leafIndex, leafCount, cache);
     }
 

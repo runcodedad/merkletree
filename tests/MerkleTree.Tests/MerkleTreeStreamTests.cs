@@ -350,100 +350,6 @@ public class MerkleTreeStreamTests
     }
 
     [Fact]
-    public void BuildInBatches_WithNullLeafData_ThrowsArgumentNullException()
-    {
-        // Arrange
-        var builder = new MerkleTreeStream();
-
-        // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => builder.BuildInBatches(null!, 10));
-    }
-
-    [Fact]
-    public void BuildInBatches_WithInvalidBatchSize_ThrowsArgumentException()
-    {
-        // Arrange
-        var builder = new MerkleTreeStream();
-        var leafData = CreateLeafData("leaf1");
-
-        // Act & Assert
-        Assert.Throws<ArgumentException>(() => builder.BuildInBatches(leafData, 0));
-        Assert.Throws<ArgumentException>(() => builder.BuildInBatches(leafData, -1));
-    }
-
-    [Fact]
-    public void BuildInBatches_WithEmptyLeafData_ThrowsInvalidOperationException()
-    {
-        // Arrange
-        var builder = new MerkleTreeStream();
-        var emptyData = new List<byte[]>();
-
-        // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => builder.BuildInBatches(emptyData, 10));
-    }
-
-    [Fact]
-    public void BuildInBatches_WithVariousBatchSizes_ProducesSameResult()
-    {
-        // Arrange
-        var builder = new MerkleTreeStream();
-        var leafData = Enumerable.Range(1, 10)
-            .Select(i => Encoding.UTF8.GetBytes($"leaf{i}"))
-            .ToList();
-
-        // Act
-        var metadata1 = builder.BuildInBatches(leafData, 1);
-        var metadata2 = builder.BuildInBatches(leafData, 3);
-        var metadata5 = builder.BuildInBatches(leafData, 5);
-        var metadata10 = builder.BuildInBatches(leafData, 10);
-
-        // Assert
-        Assert.Equal(metadata1.RootHash, metadata2.RootHash);
-        Assert.Equal(metadata1.RootHash, metadata5.RootHash);
-        Assert.Equal(metadata1.RootHash, metadata10.RootHash);
-    }
-
-    [Fact]
-    public void BuildInBatches_MatchesBuildWithoutBatching()
-    {
-        // Arrange
-        var builder = new MerkleTreeStream();
-        var leafData = CreateLeafData("leaf1", "leaf2", "leaf3", "leaf4", "leaf5");
-
-        // Act
-        var noBatchMetadata = builder.Build(leafData);
-        var batchMetadata = builder.BuildInBatches(leafData, 2);
-
-        // Assert
-        Assert.Equal(noBatchMetadata.RootHash, batchMetadata.RootHash);
-        Assert.Equal(noBatchMetadata.Height, batchMetadata.Height);
-        Assert.Equal(noBatchMetadata.LeafCount, batchMetadata.LeafCount);
-    }
-
-    [Fact]
-    public void BuildInBatches_WithLargeDataset_ProducesCorrectResult()
-    {
-        // Arrange
-        var builder = new MerkleTreeStream();
-        var largeLeafCount = 1000;
-        var leafData = Enumerable.Range(1, largeLeafCount)
-            .Select(i => Encoding.UTF8.GetBytes($"leaf{i}"))
-            .ToList();
-
-        // Act
-        var metadata = builder.BuildInBatches(leafData, 100);
-
-        // Assert
-        Assert.NotNull(metadata);
-        Assert.NotNull(metadata.RootHash);
-        Assert.Equal(largeLeafCount, metadata.LeafCount);
-
-        // Verify against non-batched build
-        var nonBatchedMetadata = builder.Build(leafData);
-        Assert.Equal(nonBatchedMetadata.RootHash, metadata.RootHash);
-    }
-
-    [Fact]
     public void Build_WithDifferentHashFunctions_ProducesDifferentResults()
     {
         // Arrange
@@ -461,18 +367,18 @@ public class MerkleTreeStreamTests
     }
 
     [Fact]
-    public void Build_ProcessesStreamWithoutMaterializingAllData()
+    public void Build_ProcessesStreamCorrectly()
     {
-        // This test simulates streaming by using a generator
-        // that would throw if the entire sequence was materialized
+        // This test verifies that Build processes leaves correctly
 
         // Arrange
         var builder = new MerkleTreeStream();
-        var maxAllowedMaterialization = 100;
-        var leafData = GenerateStreamingLeaves(1000, maxAllowedMaterialization);
+        var leafData = Enumerable.Range(1, 1000)
+            .Select(i => Encoding.UTF8.GetBytes($"leaf{i}"))
+            .ToList();
 
-        // Act - This should work because BuildInBatches processes in chunks
-        var metadata = builder.BuildInBatches(leafData, 10);
+        // Act
+        var metadata = builder.Build(leafData);
 
         // Assert
         Assert.Equal(1000, metadata.LeafCount);
