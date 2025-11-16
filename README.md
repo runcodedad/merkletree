@@ -17,9 +17,12 @@ This library provides a robust, well-tested implementation of Merkle trees for .
 
 - **Multi-targeting support**: Compatible with .NET 10.0 and .NET Standard 2.1
 - **High performance**: Optimized for speed and memory efficiency
+- **Streaming support**: Build trees from large datasets without loading everything into memory
+- **Async/await support**: Process data asynchronously with `IAsyncEnumerable<byte[]>`
+- **Batch processing**: Control memory usage with configurable batch sizes
 - **Type-safe**: Full C# type safety with nullable reference types enabled
 - **XML documentation**: IntelliSense support for better developer experience
-- **Well-tested**: Comprehensive test coverage
+- **Well-tested**: Comprehensive test coverage (91+ tests)
 - **Open source**: MIT licensed
 
 ## Installation
@@ -37,6 +40,8 @@ Install-Package MerkleTree
 ```
 
 ## Quick Start
+
+### In-Memory Merkle Tree
 
 ```csharp
 using MerkleTree;
@@ -57,8 +62,46 @@ var tree = new MerkleTree(leafData);
 byte[] rootHash = tree.GetRootHash();
 Console.WriteLine($"Root Hash: {Convert.ToHexString(rootHash)}");
 
+// Or get full metadata
+var metadata = tree.GetMetadata();
+Console.WriteLine($"Root Hash: {Convert.ToHexString(metadata.RootHash)}");
+Console.WriteLine($"Height: {metadata.Height}, Leaves: {metadata.LeafCount}");
+
 // Use a different hash algorithm (default is SHA256)
-var treeSHA512 = new MerkleTree(leafData, HashAlgorithmName.SHA512);
+var treeSHA512 = new MerkleTree(leafData, new Sha512HashFunction());
+```
+
+### Streaming Merkle Tree Builder
+
+For large datasets that don't fit in memory, use the streaming builder:
+
+```csharp
+using MerkleTree;
+using System.Text;
+
+// Create a builder
+var builder = new MerkleTreeBuilder();
+
+// Stream data from any source (file, database, network, etc.)
+var leafData = GenerateLeaves(); // IEnumerable<byte[]>
+
+// Build tree with batch processing
+var metadata = builder.BuildInBatches(leafData, batchSize: 1000);
+
+Console.WriteLine($"Root Hash: {Convert.ToHexString(metadata.RootHash)}");
+Console.WriteLine($"Tree Height: {metadata.Height}");
+Console.WriteLine($"Leaf Count: {metadata.LeafCount}");
+```
+
+### Async Streaming
+
+```csharp
+// For async data sources
+var builder = new MerkleTreeBuilder();
+var asyncLeaves = ReadLeavesFromStreamAsync(); // IAsyncEnumerable<byte[]>
+
+var metadata = await builder.BuildAsync(asyncLeaves);
+Console.WriteLine($"Root Hash: {Convert.ToHexString(metadata.RootHash)}");
 ```
 
 ## Tree Structure and Design
@@ -102,6 +145,63 @@ Where `Pad = Hash("MERKLE_PADDING" || L3)`
 - **Leaf processing**: Left-to-right in the order provided in the input array
 - **Parent hash computation**: Always `Hash(left_child || right_child)`
 - **Unpaired nodes**: Become the left child, with padding as the right child
+
+## Streaming Support
+
+The library includes a `MerkleTreeStream` class designed for processing large datasets that exceed available memory:
+
+### Features
+
+- **Memory-efficient**: Process datasets larger than available RAM
+- **Streaming input**: Accept leaves from `IEnumerable<byte[]>` or `IAsyncEnumerable<byte[]>`
+- **Batch processing**: Control memory usage with configurable batch sizes
+- **Incremental processing**: Build levels incrementally without materializing the entire dataset
+- **Deterministic results**: Produces identical root hashes to in-memory `MerkleTree` class
+
+### Use Cases
+
+1. **Large file processing**: Process multi-gigabyte files with fixed-size records
+2. **Database streaming**: Build trees from database query results without loading all rows
+3. **Network streaming**: Process data received over network connections
+4. **Async I/O**: Efficiently handle async data sources with `BuildAsync`
+
+### Example: Processing a Large File
+
+```csharp
+var builder = new MerkleTreeStream();
+
+// Read fixed-size records from file
+IEnumerable<byte[]> ReadRecordsFromFile(string path, int recordSize)
+{
+    using var stream = File.OpenRead(path);
+    var buffer = new byte[recordSize];
+    
+    while (stream.Read(buffer, 0, recordSize) == recordSize)
+    {
+        yield return buffer.ToArray();
+    }
+}
+
+var records = ReadRecordsFromFile("largefile.dat", recordSize: 32);
+var metadata = builder.BuildInBatches(records, batchSize: 1000);
+
+Console.WriteLine($"Processed {metadata.LeafCount:N0} records");
+Console.WriteLine($"Root Hash: {Convert.ToHexString(metadata.RootHash)}");
+Console.WriteLine($"Tree Height: {metadata.Height}");
+```
+
+### Metadata
+
+The `MerkleTreeMetadata` class provides information about the constructed tree:
+
+- **Root**: The root node of the tree (`MerkleTreeNode`)
+- **RootHash**: The Merkle root hash (convenience property from `Root.Hash`)
+- **Height**: The height of the tree (0 for single leaf, 1 for two leaves, etc.)
+- **LeafCount**: The total number of leaves processed
+
+Both `MerkleTree.GetMetadata()` and `MerkleTreeStream.Build()` return `MerkleTreeMetadata` for consistency.
+
+For more details and examples, see [docs/STREAMING.md](docs/STREAMING.md).
 
 ## Requirements
 
@@ -158,8 +258,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   - Binary tree structure with leaves at Level 0
   - Domain-separated padding strategy for odd leaf counts
   - Fully deterministic tree structure based on leaf ordering
-  - Support for multiple hash algorithms (SHA256, SHA384, SHA512, MD5, SHA1)
-  - Comprehensive test coverage (23+ tests)
+  - Support for multiple hash algorithms (SHA-256, SHA-512, BLAKE3)
+- **Streaming Merkle tree builder** (NEW)
+  - Process datasets larger than available RAM
+  - Support for `IEnumerable<byte[]>` and `IAsyncEnumerable<byte[]>`
+  - Batch processing with configurable batch sizes
+  - Incremental level-by-level tree construction
+  - Returns tree metadata (root hash, height, leaf count)
+  - Produces identical results to in-memory construction
+- Comprehensive test coverage (91+ tests)
 
 ## Support
 

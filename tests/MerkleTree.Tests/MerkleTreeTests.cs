@@ -337,4 +337,54 @@ public class MerkleTreeTests
         // Assert - these should be different because we use padding, not duplication
         Assert.NotEqual(rootHash, hashWithDuplication);
     }
+    
+    [Fact]
+    public void GetMetadata_ReturnsCorrectMetadata()
+    {
+        // Arrange
+        var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
+        var tree = new MerkleTree(leafData);
+        
+        // Act
+        var metadata = tree.GetMetadata();
+        
+        // Assert
+        Assert.NotNull(metadata);
+        Assert.Same(tree.Root, metadata.Root);
+        Assert.Equal(tree.GetRootHash(), metadata.RootHash);
+        Assert.Equal(2, metadata.Height); // 3 leaves = height 2
+        Assert.Equal(3, metadata.LeafCount);
+    }
+    
+    [Fact]
+    public void GetMetadata_WithSingleLeaf_ReturnsCorrectMetadata()
+    {
+        // Arrange
+        var leafData = CreateLeafData("leaf1");
+        var tree = new MerkleTree(leafData);
+        
+        // Act
+        var metadata = tree.GetMetadata();
+        
+        // Assert
+        Assert.NotNull(metadata);
+        Assert.Equal(0, metadata.Height); // Single leaf = height 0
+        Assert.Equal(1, metadata.LeafCount);
+    }
+    
+    [Fact]
+    public void GetMetadata_WithPowerOfTwoLeaves_ReturnsCorrectMetadata()
+    {
+        // Arrange
+        var leafData = CreateLeafData("l1", "l2", "l3", "l4");
+        var tree = new MerkleTree(leafData);
+        
+        // Act
+        var metadata = tree.GetMetadata();
+        
+        // Assert
+        Assert.NotNull(metadata);
+        Assert.Equal(2, metadata.Height); // 4 leaves = height 2
+        Assert.Equal(4, metadata.LeafCount);
+    }
 }

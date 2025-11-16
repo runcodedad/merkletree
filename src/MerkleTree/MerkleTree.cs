@@ -32,21 +32,22 @@ namespace MerkleTree;
 /// <item><description>Unpaired nodes become the left child, padding hash becomes the right child</description></item>
 /// </list>
 /// </remarks>
-public class MerkleTree
+public class MerkleTree : MerkleTreeBase
 {
-    private const string PaddingDomainSeparator = "MERKLE_PADDING";
-    
-    private readonly IHashFunction _hashFunction;
-    
     /// <summary>
     /// Gets the root node of the Merkle tree.
     /// </summary>
     public MerkleTreeNode Root { get; }
     
     /// <summary>
-    /// Gets the hash function used for computing node hashes.
+    /// Gets the height of the Merkle tree.
     /// </summary>
-    public IHashFunction HashFunction => _hashFunction;
+    private int Height { get; }
+    
+    /// <summary>
+    /// Gets the number of leaves in the Merkle tree.
+    /// </summary>
+    private long LeafCount { get; }
     
     /// <summary>
     /// Initializes a new instance of the <see cref="MerkleTree"/> class with the specified leaf data using SHA-256.
@@ -67,18 +68,19 @@ public class MerkleTree
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="leafData"/> or <paramref name="hashFunction"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="leafData"/> is empty.</exception>
     public MerkleTree(IEnumerable<byte[]> leafData, IHashFunction hashFunction)
+        : base(hashFunction)
     {
         if (leafData == null)
             throw new ArgumentNullException(nameof(leafData));
-        if (hashFunction == null)
-            throw new ArgumentNullException(nameof(hashFunction));
         
         var leafList = leafData.ToList();
         if (leafList.Count == 0)
             throw new ArgumentException("Leaf data must contain at least one element.", nameof(leafData));
         
-        _hashFunction = hashFunction;
-        Root = BuildTree(leafList);
+        LeafCount = leafList.Count;
+        var (root, height) = BuildTree(leafList);
+        Root = root;
+        Height = height;
     }
 
     
@@ -86,19 +88,22 @@ public class MerkleTree
     /// Builds the Merkle tree from the provided leaf data.
     /// </summary>
     /// <param name="leafData">The data for each leaf node.</param>
-    /// <returns>The root node of the constructed tree.</returns>
-    private MerkleTreeNode BuildTree(List<byte[]> leafData)
+    /// <returns>A tuple containing the root node and the height of the tree.</returns>
+    private (MerkleTreeNode root, int height) BuildTree(List<byte[]> leafData)
     {
         // Create leaf nodes at Level 0
         var currentLevel = leafData.Select(data => new MerkleTreeNode(ComputeHash(data))).ToList();
+        
+        int height = 0;
         
         // Build tree bottom-up until we reach the root
         while (currentLevel.Count > 1)
         {
             currentLevel = BuildNextLevel(currentLevel);
+            height++;
         }
         
-        return currentLevel[0];
+        return (currentLevel[0], height);
     }
     
     /// <summary>
@@ -148,33 +153,9 @@ public class MerkleTree
     /// <returns>A padding node with a domain-separated hash.</returns>
     private MerkleTreeNode CreatePaddingNode(MerkleTreeNode unpairedNode)
     {
-        // Compute padding hash as Hash("MERKLE_PADDING" || unpaired_node_hash)
-        var domainSeparatorBytes = System.Text.Encoding.UTF8.GetBytes(PaddingDomainSeparator);
-        var paddingHash = ComputeParentHash(domainSeparatorBytes, unpairedNode.Hash!);
-        
+        // Compute padding hash using base class method
+        var paddingHash = CreatePaddingHash(unpairedNode.Hash!);
         return new MerkleTreeNode(paddingHash);
-    }
-    
-    /// <summary>
-    /// Computes the hash of the given data using the configured hash function.
-    /// </summary>
-    /// <param name="data">The data to hash.</param>
-    /// <returns>The computed hash.</returns>
-    private byte[] ComputeHash(byte[] data)
-    {
-        return _hashFunction.ComputeHash(data);
-    }
-    
-    /// <summary>
-    /// Computes the parent hash from two child hashes: Hash(left || right).
-    /// </summary>
-    /// <param name="leftHash">The hash of the left child.</param>
-    /// <param name="rightHash">The hash of the right child.</param>
-    /// <returns>The computed parent hash.</returns>
-    private byte[] ComputeParentHash(byte[] leftHash, byte[] rightHash)
-    {
-        var combinedHash = leftHash.Concat(rightHash).ToArray();
-        return ComputeHash(combinedHash);
     }
     
     /// <summary>
@@ -184,5 +165,14 @@ public class MerkleTree
     public byte[] GetRootHash()
     {
         return Root.Hash ?? Array.Empty<byte>();
+    }
+    
+    /// <summary>
+    /// Gets the metadata for this Merkle tree.
+    /// </summary>
+    /// <returns>Metadata containing the root node, height, and leaf count.</returns>
+    public MerkleTreeMetadata GetMetadata()
+    {
+        return new MerkleTreeMetadata(Root, Height, LeafCount);
     }
 }
