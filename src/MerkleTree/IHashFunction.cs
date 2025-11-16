@@ -27,7 +27,7 @@ public interface IHashFunction
     /// deserializing Merkle tree data structures. It should be unique and stable across versions.
     /// </remarks>
     string Name { get; }
-    
+
     /// <summary>
     /// Gets the fixed output size (in bytes) of the hash function.
     /// </summary>
@@ -36,7 +36,7 @@ public interface IHashFunction
     /// For example, SHA-256 returns 32 bytes, SHA-512 returns 64 bytes.
     /// </remarks>
     int HashSizeInBytes { get; }
-    
+
     /// <summary>
     /// Computes the hash of the provided data.
     /// </summary>

@@ -25,10 +25,10 @@ public class Blake3HashFunction : IHashFunction
 {
     /// <inheritdoc/>
     public string Name => "BLAKE3";
-    
+
     /// <inheritdoc/>
     public int HashSizeInBytes => 32;
-    
+
     /// <inheritdoc/>
     public byte[] ComputeHash(byte[] data)
     {

@@ -38,17 +38,17 @@ public class MerkleTree : MerkleTreeBase
     /// Gets the root node of the Merkle tree.
     /// </summary>
     public MerkleTreeNode Root { get; }
-    
+
     /// <summary>
     /// Gets the height of the Merkle tree.
     /// </summary>
     private int Height { get; }
-    
+
     /// <summary>
     /// Gets the number of leaves in the Merkle tree.
     /// </summary>
     private long LeafCount { get; }
-    
+
     /// <summary>
     /// Initializes a new instance of the <see cref="MerkleTree"/> class with the specified leaf data using SHA-256.
     /// </summary>
@@ -59,7 +59,7 @@ public class MerkleTree : MerkleTreeBase
         : this(leafData, new Sha256HashFunction())
     {
     }
-    
+
     /// <summary>
     /// Initializes a new instance of the <see cref="MerkleTree"/> class with the specified leaf data and hash function.
     /// </summary>
@@ -72,18 +72,18 @@ public class MerkleTree : MerkleTreeBase
     {
         if (leafData == null)
             throw new ArgumentNullException(nameof(leafData));
-        
+
         var leafList = leafData.ToList();
         if (leafList.Count == 0)
             throw new ArgumentException("Leaf data must contain at least one element.", nameof(leafData));
-        
+
         LeafCount = leafList.Count;
         var (root, height) = BuildTree(leafList);
         Root = root;
         Height = height;
     }
 
-    
+
     /// <summary>
     /// Builds the Merkle tree from the provided leaf data.
     /// </summary>
@@ -93,19 +93,19 @@ public class MerkleTree : MerkleTreeBase
     {
         // Create leaf nodes at Level 0
         var currentLevel = leafData.Select(data => new MerkleTreeNode(ComputeHash(data))).ToList();
-        
+
         int height = 0;
-        
+
         // Build tree bottom-up until we reach the root
         while (currentLevel.Count > 1)
         {
             currentLevel = BuildNextLevel(currentLevel);
             height++;
         }
-        
+
         return (currentLevel[0], height);
     }
-    
+
     /// <summary>
     /// Builds the next level of the tree from the current level.
     /// </summary>
@@ -114,12 +114,12 @@ public class MerkleTree : MerkleTreeBase
     private List<MerkleTreeNode> BuildNextLevel(List<MerkleTreeNode> currentLevel)
     {
         var nextLevel = new List<MerkleTreeNode>();
-        
+
         for (int i = 0; i < currentLevel.Count; i += 2)
         {
             var left = currentLevel[i];
             MerkleTreeNode right;
-            
+
             // Check if we have an odd number of nodes (unpaired node at the end)
             if (i + 1 < currentLevel.Count)
             {
@@ -131,7 +131,7 @@ public class MerkleTree : MerkleTreeBase
                 // Odd case: create padding node using domain-separated hash
                 right = CreatePaddingNode(left);
             }
-            
+
             // Create parent node: Hash(left || right)
             var parentHash = ComputeParentHash(left.Hash!, right.Hash!);
             var parentNode = new MerkleTreeNode(parentHash)
@@ -139,13 +139,13 @@ public class MerkleTree : MerkleTreeBase
                 Left = left,
                 Right = right
             };
-            
+
             nextLevel.Add(parentNode);
         }
-        
+
         return nextLevel;
     }
-    
+
     /// <summary>
     /// Creates a padding node for an unpaired node using domain-separated hashing.
     /// </summary>
@@ -157,7 +157,7 @@ public class MerkleTree : MerkleTreeBase
         var paddingHash = CreatePaddingHash(unpairedNode.Hash!);
         return new MerkleTreeNode(paddingHash);
     }
-    
+
     /// <summary>
     /// Gets the root hash of the Merkle tree.
     /// </summary>
@@ -166,7 +166,7 @@ public class MerkleTree : MerkleTreeBase
     {
         return Root.Hash ?? Array.Empty<byte>();
     }
-    
+
     /// <summary>
     /// Gets the metadata for this Merkle tree.
     /// </summary>

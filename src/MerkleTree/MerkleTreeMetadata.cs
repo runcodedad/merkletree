@@ -13,7 +13,7 @@ public class MerkleTreeMetadata
     /// Gets the root node of the Merkle tree.
     /// </summary>
     public MerkleTreeNode Root { get; }
-    
+
     /// <summary>
     /// Gets the root hash of the Merkle tree.
     /// </summary>
@@ -21,7 +21,7 @@ public class MerkleTreeMetadata
     /// This is a convenience property that returns the hash from the Root node.
     /// </remarks>
     public byte[] RootHash => Root.Hash ?? Array.Empty<byte>();
-    
+
     /// <summary>
     /// Gets the height of the Merkle tree.
     /// </summary>
@@ -30,12 +30,12 @@ public class MerkleTreeMetadata
     /// A single leaf has height 0, two leaves have height 1, etc.
     /// </remarks>
     public int Height { get; }
-    
+
     /// <summary>
     /// Gets the number of leaves in the Merkle tree.
     /// </summary>
     public long LeafCount { get; }
-    
+
     /// <summary>
     /// Initializes a new instance of the <see cref="MerkleTreeMetadata"/> class.
     /// </summary>
@@ -47,5 +47,33 @@ public class MerkleTreeMetadata
         Root = root ?? throw new ArgumentNullException(nameof(root));
         Height = height;
         LeafCount = leafCount;
+    }
+
+    /// <summary>
+    /// Serializes the root hash to a fixed-size binary form.
+    /// </summary>
+    /// <returns>The root hash as a byte array.</returns>
+    /// <remarks>
+    /// This is a convenience method that serializes the root node's hash.
+    /// The size of the returned array depends on the hash function used to create the tree.
+    /// </remarks>
+    public byte[] SerializeRoot()
+    {
+        return Root.Serialize();
+    }
+
+    /// <summary>
+    /// Deserializes a root hash from its binary representation.
+    /// </summary>
+    /// <param name="data">The binary data to deserialize.</param>
+    /// <returns>A new <see cref="MerkleTreeNode"/> representing the root.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="data"/> is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="data"/> is empty.</exception>
+    /// <remarks>
+    /// This is a convenience method that deserializes a root node from binary data.
+    /// </remarks>
+    public static MerkleTreeNode DeserializeRoot(byte[] data)
+    {
+        return MerkleTreeNode.Deserialize(data);
     }
 }

@@ -17,17 +17,17 @@ public abstract class MerkleTreeBase
     /// The domain separator used for padding hashes.
     /// </summary>
     protected const string PaddingDomainSeparator = "MERKLE_PADDING";
-    
+
     /// <summary>
     /// The hash function used for computing node hashes.
     /// </summary>
     protected readonly IHashFunction _hashFunction;
-    
+
     /// <summary>
     /// Gets the hash function used for computing node hashes.
     /// </summary>
     public IHashFunction HashFunction => _hashFunction;
-    
+
     /// <summary>
     /// Initializes a new instance of the <see cref="MerkleTreeBase"/> class.
     /// </summary>
@@ -37,7 +37,7 @@ public abstract class MerkleTreeBase
     {
         _hashFunction = hashFunction ?? throw new ArgumentNullException(nameof(hashFunction));
     }
-    
+
     /// <summary>
     /// Computes the hash of the given data using the configured hash function.
     /// </summary>
@@ -47,7 +47,7 @@ public abstract class MerkleTreeBase
     {
         return _hashFunction.ComputeHash(data);
     }
-    
+
     /// <summary>
     /// Computes the parent hash from two child hashes: Hash(left || right).
     /// </summary>
@@ -59,7 +59,7 @@ public abstract class MerkleTreeBase
         var combinedHash = leftHash.Concat(rightHash).ToArray();
         return ComputeHash(combinedHash);
     }
-    
+
     /// <summary>
     /// Creates a padding hash for an unpaired node using domain-separated hashing.
     /// </summary>

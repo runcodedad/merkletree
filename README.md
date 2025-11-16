@@ -17,12 +17,13 @@ This library provides a robust, well-tested implementation of Merkle trees for .
 
 - **Multi-targeting support**: Compatible with .NET 10.0 and .NET Standard 2.1
 - **High performance**: Optimized for speed and memory efficiency
+- **Root serialization**: Deterministic binary serialization with configurable hash sizes
 - **Streaming support**: Build trees from large datasets without loading everything into memory
 - **Async/await support**: Process data asynchronously with `IAsyncEnumerable<byte[]>`
 - **Batch processing**: Control memory usage with configurable batch sizes
 - **Type-safe**: Full C# type safety with nullable reference types enabled
 - **XML documentation**: IntelliSense support for better developer experience
-- **Well-tested**: Comprehensive test coverage (91+ tests)
+- **Well-tested**: Comprehensive test coverage (112+ tests)
 - **Open source**: MIT licensed
 
 ## Installation
@@ -203,6 +204,78 @@ Both `MerkleTree.GetMetadata()` and `MerkleTreeStream.Build()` return `MerkleTre
 
 For more details and examples, see [docs/STREAMING.md](docs/STREAMING.md).
 
+## Root Serialization
+
+The library provides deterministic binary serialization for Merkle tree roots, enabling storage and transmission of root hashes in a fixed-size binary format.
+
+### Features
+
+- **Fixed-size output**: Serialized roots match the hash function size (32 bytes for SHA-256/BLAKE3, 64 bytes for SHA-512)
+- **Deterministic**: Same tree always produces the same serialized output
+- **Validated**: Serialization checks for null hashes; deserialization validates input
+- **Round-trip safe**: `Deserialize(Serialize(node))` preserves the root hash
+
+### Basic Usage
+
+```csharp
+using MerkleTree;
+using System.Text;
+
+var leafData = new List<byte[]>
+{
+    Encoding.UTF8.GetBytes("data1"),
+    Encoding.UTF8.GetBytes("data2"),
+    Encoding.UTF8.GetBytes("data3")
+};
+
+var tree = new MerkleTree(leafData);
+
+// Serialize root to fixed-size binary
+byte[] serialized = tree.Root.Serialize();  // 32 bytes for SHA-256
+Console.WriteLine($"Serialized: {Convert.ToHexString(serialized)}");
+
+// Deserialize back to a node
+var root = MerkleTreeNode.Deserialize(serialized);
+Console.WriteLine($"Deserialized: {Convert.ToHexString(root.Hash)}");
+```
+
+### Using Metadata Convenience Methods
+
+```csharp
+// Serialize using metadata
+var metadata = tree.GetMetadata();
+byte[] rootBytes = metadata.SerializeRoot();
+
+// Deserialize from binary
+var deserializedRoot = MerkleTreeMetadata.DeserializeRoot(rootBytes);
+```
+
+### Multi-Hash Function Support
+
+Different hash functions produce different output sizes:
+
+```csharp
+// SHA-256 produces 32 bytes
+var treeSha256 = new MerkleTree(leafData, new Sha256HashFunction());
+var sha256Root = treeSha256.Root.Serialize();  // 32 bytes
+
+// SHA-512 produces 64 bytes
+var treeSha512 = new MerkleTree(leafData, new Sha512HashFunction());
+var sha512Root = treeSha512.Root.Serialize();  // 64 bytes
+
+// BLAKE3 produces 32 bytes
+var treeBlake3 = new MerkleTree(leafData, new Blake3HashFunction());
+var blake3Root = treeBlake3.Root.Serialize();  // 32 bytes
+```
+
+### When to Use Serialization vs Direct Hash Access
+
+- **Use `Serialize()`**: When you need a validated, serializable representation for storage or transmission
+- **Use `Hash` property**: For direct access in internal operations, testing, or debugging
+- **Use `GetRootHash()`**: Convenience method that returns the root hash directly
+
+The serialization format is simply the raw hash bytes, providing minimal overhead while maintaining deterministic behavior.
+
 ## Requirements
 
 - **.NET 10.0** or later, or
@@ -259,14 +332,19 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   - Domain-separated padding strategy for odd leaf counts
   - Fully deterministic tree structure based on leaf ordering
   - Support for multiple hash algorithms (SHA-256, SHA-512, BLAKE3)
-- **Streaming Merkle tree builder** (NEW)
+- **Streaming Merkle tree builder**
   - Process datasets larger than available RAM
   - Support for `IEnumerable<byte[]>` and `IAsyncEnumerable<byte[]>`
   - Batch processing with configurable batch sizes
   - Incremental level-by-level tree construction
   - Returns tree metadata (root hash, height, leaf count)
   - Produces identical results to in-memory construction
-- Comprehensive test coverage (91+ tests)
+- **Root serialization** (NEW)
+  - Fixed-size binary serialization for Merkle roots
+  - Deterministic format matching hash function size
+  - Validated serialization and deserialization
+  - Round-trip safe with defensive copying
+- Comprehensive test coverage (112+ tests)
 
 ## Support
 

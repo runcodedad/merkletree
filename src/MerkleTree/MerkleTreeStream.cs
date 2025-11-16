@@ -21,7 +21,7 @@ namespace MerkleTree;
 /// </remarks>
 public class MerkleTreeStream : MerkleTreeBase
 {
-    
+
     /// <summary>
     /// Initializes a new instance of the <see cref="MerkleTreeStream"/> class using SHA-256.
     /// </summary>
@@ -29,7 +29,7 @@ public class MerkleTreeStream : MerkleTreeBase
         : this(new Sha256HashFunction())
     {
     }
-    
+
     /// <summary>
     /// Initializes a new instance of the <see cref="MerkleTreeStream"/> class with the specified hash function.
     /// </summary>
@@ -39,7 +39,7 @@ public class MerkleTreeStream : MerkleTreeBase
         : base(hashFunction)
     {
     }
-    
+
     /// <summary>
     /// Builds a Merkle tree from a stream of leaf data asynchronously.
     /// </summary>
@@ -54,29 +54,29 @@ public class MerkleTreeStream : MerkleTreeBase
     {
         if (leafData == null)
             throw new ArgumentNullException(nameof(leafData));
-        
+
         // Process leaves and build Level 0
         var (level0Hashes, leafCount) = await ProcessLeavesAsync(leafData, cancellationToken);
-        
+
         if (leafCount == 0)
             throw new InvalidOperationException("At least one leaf is required to build a Merkle tree.");
-        
+
         // Build tree bottom-up
         var currentLevel = level0Hashes;
         int height = 0;
-        
+
         while (currentLevel.Count > 1)
         {
             currentLevel = BuildNextLevel(currentLevel);
             height++;
         }
-        
+
         var rootHash = currentLevel[0];
         var rootNode = new MerkleTreeNode(rootHash);
-        
+
         return new MerkleTreeMetadata(rootNode, height, leafCount);
     }
-    
+
     /// <summary>
     /// Builds a Merkle tree from a stream of leaf data synchronously.
     /// </summary>
@@ -88,29 +88,29 @@ public class MerkleTreeStream : MerkleTreeBase
     {
         if (leafData == null)
             throw new ArgumentNullException(nameof(leafData));
-        
+
         // Process leaves and build Level 0
         var (level0Hashes, leafCount) = ProcessLeaves(leafData);
-        
+
         if (leafCount == 0)
             throw new InvalidOperationException("At least one leaf is required to build a Merkle tree.");
-        
+
         // Build tree bottom-up
         var currentLevel = level0Hashes;
         int height = 0;
-        
+
         while (currentLevel.Count > 1)
         {
             currentLevel = BuildNextLevel(currentLevel);
             height++;
         }
-        
+
         var rootHash = currentLevel[0];
         var rootNode = new MerkleTreeNode(rootHash);
-        
+
         return new MerkleTreeMetadata(rootNode, height, leafCount);
     }
-    
+
     /// <summary>
     /// Builds a Merkle tree from a stream of leaf data in batches.
     /// </summary>
@@ -126,29 +126,29 @@ public class MerkleTreeStream : MerkleTreeBase
             throw new ArgumentNullException(nameof(leafData));
         if (batchSize < 1)
             throw new ArgumentException("Batch size must be at least 1.", nameof(batchSize));
-        
+
         // Process leaves in batches and build Level 0
         var (level0Hashes, leafCount) = ProcessLeavesInBatches(leafData, batchSize);
-        
+
         if (leafCount == 0)
             throw new InvalidOperationException("At least one leaf is required to build a Merkle tree.");
-        
+
         // Build tree bottom-up
         var currentLevel = level0Hashes;
         int height = 0;
-        
+
         while (currentLevel.Count > 1)
         {
             currentLevel = BuildNextLevel(currentLevel);
             height++;
         }
-        
+
         var rootHash = currentLevel[0];
         var rootNode = new MerkleTreeNode(rootHash);
-        
+
         return new MerkleTreeMetadata(rootNode, height, leafCount);
     }
-    
+
     /// <summary>
     /// Processes leaves asynchronously and computes their hashes.
     /// </summary>
@@ -158,17 +158,17 @@ public class MerkleTreeStream : MerkleTreeBase
     {
         var hashes = new List<byte[]>();
         long count = 0;
-        
+
         await foreach (var leaf in leafData.WithCancellation(cancellationToken))
         {
             var hash = ComputeHash(leaf);
             hashes.Add(hash);
             count++;
         }
-        
+
         return (hashes, count);
     }
-    
+
     /// <summary>
     /// Processes leaves synchronously and computes their hashes.
     /// </summary>
@@ -176,17 +176,17 @@ public class MerkleTreeStream : MerkleTreeBase
     {
         var hashes = new List<byte[]>();
         long count = 0;
-        
+
         foreach (var leaf in leafData)
         {
             var hash = ComputeHash(leaf);
             hashes.Add(hash);
             count++;
         }
-        
+
         return (hashes, count);
     }
-    
+
     /// <summary>
     /// Processes leaves in batches to minimize memory usage.
     /// </summary>
@@ -197,12 +197,12 @@ public class MerkleTreeStream : MerkleTreeBase
         var hashes = new List<byte[]>();
         long count = 0;
         var batch = new List<byte[]>(batchSize);
-        
+
         foreach (var leaf in leafData)
         {
             batch.Add(leaf);
             count++;
-            
+
             if (batch.Count >= batchSize)
             {
                 // Process batch
@@ -214,29 +214,29 @@ public class MerkleTreeStream : MerkleTreeBase
                 batch.Clear();
             }
         }
-        
+
         // Process remaining items in the last batch
         foreach (var leafInBatch in batch)
         {
             var hash = ComputeHash(leafInBatch);
             hashes.Add(hash);
         }
-        
+
         return (hashes, count);
     }
-    
+
     /// <summary>
     /// Builds the next level of the tree from the current level.
     /// </summary>
     private List<byte[]> BuildNextLevel(List<byte[]> currentLevel)
     {
         var nextLevel = new List<byte[]>();
-        
+
         for (int i = 0; i < currentLevel.Count; i += 2)
         {
             var leftHash = currentLevel[i];
             byte[] rightHash;
-            
+
             // Check if we have an odd number of nodes (unpaired node at the end)
             if (i + 1 < currentLevel.Count)
             {
@@ -248,13 +248,13 @@ public class MerkleTreeStream : MerkleTreeBase
                 // Odd case: create padding hash using domain-separated hashing
                 rightHash = CreatePaddingHash(leftHash);
             }
-            
+
             // Create parent hash: Hash(left || right)
             var parentHash = ComputeParentHash(leftHash, rightHash);
             nextLevel.Add(parentHash);
         }
-        
+
         return nextLevel;
     }
-    
+
 }

@@ -22,10 +22,10 @@ public class Sha512HashFunction : IHashFunction
 {
     /// <inheritdoc/>
     public string Name => "SHA-512";
-    
+
     /// <inheritdoc/>
     public int HashSizeInBytes => 64;
-    
+
     /// <inheritdoc/>
     public byte[] ComputeHash(byte[] data)
     {
