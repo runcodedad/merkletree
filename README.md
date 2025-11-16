@@ -348,7 +348,7 @@ var metadata = await builder.BuildAsync(asyncLeafData);
 var proof = await builder.GenerateProofAsync(ReadLargeDatasetAsync(), leafIndex: 1000);
 ```
 
-**Performance Note**: The streaming proof generation is optimized to compute only O(log n) hashes along the path from the leaf to the root, rather than rebuilding the entire tree. This makes it efficient even for very large datasets.
+**Performance Note**: The streaming proof generation builds the tree level by level (O(n) time complexity) but only stores one level in memory at a time, making it memory-efficient for large datasets. While it processes all leaves to generate the proof, it avoids storing the entire tree structure.
 
 ### Use Cases
 

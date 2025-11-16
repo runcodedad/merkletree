@@ -268,9 +268,9 @@ public class MerkleTreeStream : MerkleTreeBase
     /// <exception cref="InvalidOperationException">Thrown when no leaves are provided.</exception>
     /// <remarks>
     /// <para>
-    /// This method computes only the necessary hashes along the path from the leaf to the root,
-    /// making it memory-efficient for large datasets. The leaf data must be provided again since
-    /// the streaming builder doesn't store the full tree.
+    /// This method builds the tree level by level to generate the proof. While this processes
+    /// all leaves (O(n)), it only stores one level at a time, making it memory-efficient.
+    /// The leaf data must be provided again since the streaming builder doesn't store the full tree.
     /// </para>
     /// <para>
     /// The proof contains the leaf value, its index, the tree height, and all sibling hashes
@@ -310,13 +310,13 @@ public class MerkleTreeStream : MerkleTreeBase
 
         var siblingHashes = new List<byte[]>();
         var siblingIsRight = new List<bool>();
-        var cache = new Dictionary<(int, long), byte[]>();
 
-        // Start at the leaf level and work our way up
+        // Build the tree level by level
+        // Start with level 0 (leaf hashes) - we need all of these
+        var currentLevel = leafList.Select(leaf => ComputeHash(leaf)).ToList();
         long currentIndex = leafIndex;
-        long currentLevelSize = leafList.Count;
 
-        // Traverse from leaf to root, computing only necessary hashes
+        // Traverse from leaf to root
         for (int level = 0; level < height; level++)
         {
             // Determine if current node is on left or right
@@ -337,18 +337,17 @@ public class MerkleTreeStream : MerkleTreeBase
                 siblingOnRight = false;
             }
 
-            // Compute sibling hash on-demand
+            // Get the sibling hash from the current level
             byte[] siblingHash;
-            if (siblingIndex < currentLevelSize)
+            if (siblingIndex < currentLevel.Count)
             {
-                // Sibling exists - compute its hash
-                siblingHash = ComputeHashAtPosition(leafList, level, siblingIndex, cache);
+                // Sibling exists in the current level
+                siblingHash = currentLevel[(int)siblingIndex];
             }
             else
             {
                 // No sibling exists - create padding hash
-                var currentHash = ComputeHashAtPosition(leafList, level, currentIndex, cache);
-                siblingHash = CreatePaddingHash(currentHash);
+                siblingHash = CreatePaddingHash(currentLevel[(int)currentIndex]);
             }
 
             siblingHashes.Add(siblingHash);
@@ -356,7 +355,12 @@ public class MerkleTreeStream : MerkleTreeBase
 
             // Move to parent level
             currentIndex = currentIndex / 2;
-            currentLevelSize = (currentLevelSize + 1) / 2; // Ceiling division
+
+            // Build the next level for the next iteration
+            if (level < height - 1)
+            {
+                currentLevel = BuildNextLevel(currentLevel);
+            }
         }
 
         return new MerkleProof(
@@ -388,67 +392,6 @@ public class MerkleTreeStream : MerkleTreeBase
     }
 
     /// <summary>
-    /// Computes the hash at a specific position in a specific level of the tree.
-    /// Uses memoization to avoid recomputing hashes.
-    /// </summary>
-    private byte[] ComputeHashAtPosition(List<byte[]> leafList, int level, long index, Dictionary<(int, long), byte[]>? cache = null)
-    {
-        cache ??= new Dictionary<(int, long), byte[]>();
-        
-        var key = (level, index);
-        if (cache.TryGetValue(key, out var cachedHash))
-        {
-            return cachedHash;
-        }
-
-        byte[] hash;
-        
-        // At level 0, just hash the leaf
-        if (level == 0)
-        {
-            hash = ComputeHash(leafList[(int)index]);
-        }
-        else
-        {
-            // For higher levels, recursively compute from children
-            long leftChildIndex = index * 2;
-            long rightChildIndex = index * 2 + 1;
-            long childrenLevelSize = GetLevelSize(leafList.Count, level - 1);
-
-            var leftHash = ComputeHashAtPosition(leafList, level - 1, leftChildIndex, cache);
-            
-            byte[] rightHash;
-            if (rightChildIndex < childrenLevelSize)
-            {
-                rightHash = ComputeHashAtPosition(leafList, level - 1, rightChildIndex, cache);
-            }
-            else
-            {
-                // No right child - use padding
-                rightHash = CreatePaddingHash(leftHash);
-            }
-
-            hash = ComputeParentHash(leftHash, rightHash);
-        }
-
-        cache[key] = hash;
-        return hash;
-    }
-
-    /// <summary>
-    /// Gets the number of nodes at a specific level.
-    /// </summary>
-    private static long GetLevelSize(long leafCount, int level)
-    {
-        long size = leafCount;
-        for (int i = 0; i < level; i++)
-        {
-            size = (size + 1) / 2; // Ceiling division
-        }
-        return size;
-    }
-
-    /// <summary>
     /// Generates a Merkle proof for the leaf at the specified index asynchronously.
     /// </summary>
     /// <param name="leafData">The original leaf data (must be provided again for streaming).</param>
@@ -460,9 +403,8 @@ public class MerkleTreeStream : MerkleTreeBase
     /// <exception cref="InvalidOperationException">Thrown when no leaves are provided.</exception>
     /// <remarks>
     /// <para>
-    /// This method computes only the necessary hashes along the path from the leaf to the root,
-    /// making it memory-efficient for large datasets. The leaf data must be provided again since
-    /// the streaming builder doesn't store the full tree.
+    /// This method uses the synchronous implementation after collecting the async leaves.
+    /// The leaf data must be provided again since the streaming builder doesn't store the full tree.
     /// </para>
     /// <para>
     /// The proof contains the leaf value, its index, the tree height, and all sibling hashes
