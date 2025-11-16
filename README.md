@@ -278,107 +278,18 @@ The serialization format is simply the raw hash bytes, providing minimal overhea
 
 ## Merkle Proof Generation and Verification
 
-The library provides Merkle proof generation to verify that a specific leaf is part of the tree without having access to all the data.
-
-### Basic Usage
+Generate and verify Merkle proofs to prove that a specific leaf is part of the tree:
 
 ```csharp
-using MerkleTree;
-using System.Text;
-
-var leafData = new List<byte[]>
-{
-    Encoding.UTF8.GetBytes("data1"),
-    Encoding.UTF8.GetBytes("data2"),
-    Encoding.UTF8.GetBytes("data3")
-};
-
 var tree = new MerkleTree(leafData);
-var rootHash = tree.GetRootHash();
-
-// Generate a proof for leaf at index 1
-var proof = tree.GenerateProof(1);
-
-Console.WriteLine($"Leaf Index: {proof.LeafIndex}");
-Console.WriteLine($"Tree Height: {proof.TreeHeight}");
-Console.WriteLine($"Sibling Hashes: {proof.SiblingHashes.Length}");
+var proof = tree.GenerateProof(leafIndex: 1);
 
 // Verify the proof
 var hashFunction = new Sha256HashFunction();
-bool isValid = proof.Verify(rootHash, hashFunction);
-Console.WriteLine($"Proof Valid: {isValid}");
+bool isValid = proof.Verify(tree.GetRootHash(), hashFunction);
 ```
 
-### Proof Structure
-
-A `MerkleProof` contains:
-- **LeafValue**: The original data of the leaf being proven
-- **LeafIndex**: The position of the leaf in the tree (0-based)
-- **TreeHeight**: The total height of the tree
-- **SiblingHashes**: Hashes of sibling nodes at each level from leaf to root
-- **SiblingIsRight**: Orientation bits indicating whether each sibling is on the right (true) or left (false)
-
-### Streaming Proof Generation
-
-For large datasets using `MerkleTreeStream`, proof generation requires the leaf data to be provided again:
-
-```csharp
-var builder = new MerkleTreeStream();
-
-// Stream large dataset
-var leafData = ReadLargeDataset(); // IEnumerable<byte[]>
-var metadata = builder.Build(leafData);
-
-// Generate proof without cache (rebuilds each time)
-var proof = builder.GenerateProof(leafData, leafIndex: 1000);
-
-// Verify the proof
-var hashFunction = new Sha256HashFunction();
-bool isValid = proof.Verify(metadata.RootHash, hashFunction);
-```
-
-#### Using a Cache for Multiple Proofs
-
-To improve performance when generating multiple proofs, use an external cache:
-
-```csharp
-var builder = new MerkleTreeStream();
-var metadata = builder.Build(leafData);
-
-// Create a cache to reuse across multiple proof generations
-var cache = new Dictionary<(int level, long index), byte[]>();
-
-// Generate multiple proofs using the same cache
-var proof1 = builder.GenerateProof(leafData, 100, cache);
-var proof2 = builder.GenerateProof(leafData, 200, cache);
-var proof3 = builder.GenerateProof(leafData, 300, cache);
-// After the first proof, subsequent proofs reuse cached hashes
-```
-
-The streaming builder also supports async proof generation with optional caching:
-
-```csharp
-var builder = new MerkleTreeStream();
-var asyncLeafData = ReadLargeDatasetAsync(); // IAsyncEnumerable<byte[]>
-var metadata = await builder.BuildAsync(asyncLeafData);
-
-// Generate proof asynchronously with cache
-var cache = new Dictionary<(int level, long index), byte[]>();
-var proof = await builder.GenerateProofAsync(ReadLargeDatasetAsync(), leafIndex: 1000, cache);
-```
-
-**Performance Note**: 
-- Without cache: O(n) time per proof - rebuilds the entire tree each time
-- With cache: First proof is O(n), subsequent proofs reuse cached hashes
-- Memory: Only stores one level at a time plus the cache
-- Cache is externally managed: caller controls lifecycle and can share across proof generations
-
-### Use Cases
-
-- **Inclusion proofs**: Prove that data exists in a Merkle tree without revealing other data
-- **Distributed verification**: Allow clients to verify data against a trusted root hash
-- **Blockchain applications**: Verify transactions in blocks
-- **Data integrity**: Prove specific data is part of a larger verified dataset
+For streaming scenarios and advanced usage, see [Proof Generation Documentation](docs/PROOF_GENERATION.md).
 
 ## Requirements
 
@@ -411,11 +322,12 @@ dotnet pack -c Release
 
 ## Documentation
 
-Detailed documentation will be available as the library develops. For now, refer to:
+For detailed information, see:
 
+- [Proof Generation Documentation](docs/PROOF_GENERATION.md) - Complete guide to generating and verifying Merkle proofs
+- [Streaming Documentation](docs/STREAMING.md) - Details on streaming tree construction for large datasets
 - XML documentation comments in the source code
 - IntelliSense in your IDE
-- [GitHub repository](https://github.com/runcodedad/merkletree)
 
 ## Contributing
 
