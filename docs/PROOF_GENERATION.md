@@ -85,7 +85,7 @@ var proof3 = builder.GenerateProof(leafData, 300, cache);
 
 ## Streaming Trees (Large Datasets)
 
-For datasets larger than available memory, use the streaming-optimized method:
+For datasets larger than available memory, provide the `leafCount` parameter to enable streaming mode:
 
 ```csharp
 var builder = new MerkleTreeStream();
@@ -97,10 +97,11 @@ long leafCount = 1_000_000;
 var metadata = builder.Build(GetLeafDataStream());
 
 // Generate proof without loading all data into memory
-var proof = builder.GenerateProofStreaming(
+// Pass leafCount to enable streaming mode
+var proof = builder.GenerateProof(
     GetLeafDataStream(),  // Re-provide the data stream
-    leafCount,            // Total number of leaves
-    leafIndex: 50000);    // Index to prove
+    leafIndex: 50000,     // Index to prove
+    leafCount: leafCount); // Enables streaming mode
 
 // Verify
 bool isValid = proof.Verify(metadata.RootHash, new Sha256HashFunction());
@@ -111,18 +112,20 @@ bool isValid = proof.Verify(metadata.RootHash, new Sha256HashFunction());
 ```csharp
 var cache = new Dictionary<(int level, long index), byte[]>();
 
-// Generate multiple proofs
-var proof1 = builder.GenerateProofStreaming(GetLeafDataStream(), leafCount, 100, cache);
-var proof2 = builder.GenerateProofStreaming(GetLeafDataStream(), leafCount, 200, cache);
+// Generate multiple proofs with streaming and caching
+var proof1 = builder.GenerateProof(GetLeafDataStream(), 100, leafCount, cache);
+var proof2 = builder.GenerateProof(GetLeafDataStream(), 200, leafCount, cache);
 
 // Cache persists across calls, improving performance
 ```
 
 **Important Notes:**
+- When `leafCount` is provided, streaming mode is enabled automatically
 - The leaf data stream must be re-enumerable (or provide a fresh stream for each call)
 - Only one tree level is kept in memory at a time
 - The leaf at the requested index will be accessed by enumerating to that position
 - Cache is externally managed for flexibility
+- If `leafCount` is omitted, the method converts data to a list (suitable for smaller datasets)
 
 ## Async Proof Generation
 
@@ -132,16 +135,24 @@ For async scenarios:
 var builder = new MerkleTreeStream();
 var metadata = await builder.BuildAsync(GetLeafDataAsync());
 
-// Without cache
+// Without cache (list mode)
 var proof = await builder.GenerateProofAsync(
     GetLeafDataAsync(), 
     leafIndex: 1000);
 
-// With cache
-var cache = new Dictionary<(int level, long index), byte[]>();
-var proof = await builder.GenerateProofAsync(
+// With streaming mode for large datasets
+long leafCount = 1_000_000;
+var proof2 = await builder.GenerateProofAsync(
     GetLeafDataAsync(), 
     leafIndex: 1000,
+    leafCount: leafCount);
+
+// With cache and streaming
+var cache = new Dictionary<(int level, long index), byte[]>();
+var proof3 = await builder.GenerateProofAsync(
+    GetLeafDataAsync(), 
+    leafIndex: 1000,
+    leafCount: leafCount,
     cache);
 ```
 
@@ -185,16 +196,16 @@ The verification process:
 | Scenario | Time Complexity | Space Complexity | Notes |
 |----------|----------------|------------------|-------|
 | In-memory tree | O(1) | O(1) | Tree already built |
-| Streaming (no cache) | O(n) | O(n) for largest level | Rebuilds tree |
-| Streaming (with cache) | O(n) first, O(1) after | O(n) | Cache stores all hashes |
-| Streaming large datasets | O(n) | O(n/2) per level | Memory efficient |
+| Streaming (list mode, no cache) | O(n) | O(n) for list | Converts to list, rebuilds tree |
+| Streaming (list mode, with cache) | O(n) first, O(1) after | O(n) | Cache stores all hashes |
+| Streaming (leafCount mode) | O(n) | O(n/2) per level | Memory efficient, processes stream |
 
 ## Best Practices
 
 1. **Use in-memory trees when possible**: If your dataset fits in memory, use `MerkleTree` for best performance
 2. **Cache for multiple proofs**: If generating multiple proofs, always use a cache
-3. **Know your leaf count**: For streaming large datasets, determine leaf count before proof generation
-4. **Re-enumerable streams**: Ensure your data stream can be enumerated multiple times
+3. **Provide leafCount for large datasets**: Pass the `leafCount` parameter to enable streaming mode and avoid loading all data into memory
+4. **Re-enumerable streams**: Ensure your data stream can be enumerated multiple times when using streaming mode
 5. **Hash function consistency**: Use the same hash function for building and verification
 
 ## Error Handling
