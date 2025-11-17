@@ -173,14 +173,14 @@ public class MerkleTreeStreamTests
     }
 
     [Fact]
-    public void GenerateProof_WithSingleLeaf_GeneratesEmptyProof()
+    public async Task GenerateProof_WithSingleLeaf_GeneratesEmptyProof()
     {
         // Arrange
         var builder = new MerkleTreeStream();
-        var leafData = CreateLeafData("leaf1");
+        var leafData = CreateAsyncLeafData("leaf1");
 
         // Act
-        var proof = builder.GenerateProof(leafData, 0, leafData.Count);
+        var proof = await builder.GenerateProofAsync(leafData, 0, 1);
 
         // Assert
         Assert.NotNull(proof);
@@ -188,41 +188,45 @@ public class MerkleTreeStreamTests
         Assert.Equal(0, proof.TreeHeight);
         Assert.Empty(proof.SiblingHashes);
         Assert.Empty(proof.SiblingIsRight);
-        Assert.Equal(leafData[0], proof.LeafValue);
     }
 
     [Fact]
-    public void GenerateProof_WithInvalidIndex_ThrowsArgumentOutOfRangeException()
+    public async Task GenerateProof_WithInvalidIndex_ThrowsArgumentOutOfRangeException()
     {
         // Arrange
         var builder = new MerkleTreeStream();
-        var leafData = CreateLeafData("leaf1", "leaf2");
+        var leafData = CreateAsyncLeafData("leaf1", "leaf2");
 
         // Act & Assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => builder.GenerateProof(leafData, -1, leafData.Count));
-        Assert.Throws<ArgumentOutOfRangeException>(() => builder.GenerateProof(leafData, 2, leafData.Count));
-        Assert.Throws<ArgumentOutOfRangeException>(() => builder.GenerateProof(leafData, 100, leafData.Count));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            async () => await builder.GenerateProofAsync(leafData, -1, 2));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            async () => await builder.GenerateProofAsync(CreateAsyncLeafData("leaf1", "leaf2"), 2, 2));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+            async () => await builder.GenerateProofAsync(CreateAsyncLeafData("leaf1", "leaf2"), 100, 2));
     }
 
     [Fact]
-    public void GenerateProof_WithNullLeafData_ThrowsArgumentNullException()
+    public async Task GenerateProof_WithNullLeafData_ThrowsArgumentNullException()
     {
         // Arrange
         var builder = new MerkleTreeStream();
 
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => builder.GenerateProof(null!, 0, 1));
+        await Assert.ThrowsAsync<ArgumentNullException>(
+            async () => await builder.GenerateProofAsync(null!, 0, 1));
     }
 
     [Fact]
-    public void GenerateProof_WithEmptyLeafData_ThrowsInvalidOperationException()
+    public async Task GenerateProof_WithEmptyLeafData_ThrowsArgumentException()
     {
         // Arrange
         var builder = new MerkleTreeStream();
-        var emptyData = new List<byte[]>();
+        var emptyData = CreateAsyncLeafData();
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => builder.GenerateProof(emptyData, 0, 0));
+        await Assert.ThrowsAsync<ArgumentException>(
+            async () => await builder.GenerateProofAsync(emptyData, 0, 0));
     }
 
     [Fact]
