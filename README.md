@@ -153,9 +153,11 @@ The library includes a `MerkleTreeStream` class designed for processing large da
 
 ### Features
 
-- **Memory-efficient**: Process datasets larger than available RAM
+- **Truly memory-efficient**: Uses temporary file storage, processes only one node pair at a time
+- **Handles massive datasets**: Can process 500GB+ files with billions of leaves
 - **Streaming input**: Accept leaves from `IEnumerable<byte[]>` or `IAsyncEnumerable<byte[]>`
-- **Batch processing**: Control memory usage with configurable batch sizes
+- **O(1) memory per level**: Only keeps current hash pair in memory, not entire levels
+- **Automatic cleanup**: Temp files are automatically deleted after completion
 - **Incremental processing**: Build levels incrementally without materializing the entire dataset
 - **Deterministic results**: Produces identical root hashes to in-memory `MerkleTree` class
 
@@ -184,11 +186,14 @@ IEnumerable<byte[]> ReadRecordsFromFile(string path, int recordSize)
 }
 
 var records = ReadRecordsFromFile("largefile.dat", recordSize: 32);
-var metadata = builder.BuildInBatches(records, batchSize: 1000);
+var metadata = builder.Build(records);
 
 Console.WriteLine($"Processed {metadata.LeafCount:N0} records");
 Console.WriteLine($"Root Hash: {Convert.ToHexString(metadata.RootHash)}");
 Console.WriteLine($"Tree Height: {metadata.Height}");
+
+// The Build method uses temporary files internally - no large data structures in memory!
+// Can handle files of any size (500GB+) as long as you can stream them
 ```
 
 ### Metadata
@@ -276,6 +281,21 @@ var blake3Root = treeBlake3.Root.Serialize();  // 32 bytes
 
 The serialization format is simply the raw hash bytes, providing minimal overhead while maintaining deterministic behavior.
 
+## Merkle Proof Generation and Verification
+
+Generate and verify Merkle proofs to prove that a specific leaf is part of the tree:
+
+```csharp
+var tree = new MerkleTree(leafData);
+var proof = tree.GenerateProof(leafIndex: 1);
+
+// Verify the proof
+var hashFunction = new Sha256HashFunction();
+bool isValid = proof.Verify(tree.GetRootHash(), hashFunction);
+```
+
+For streaming scenarios and advanced usage, see [Proof Generation Documentation](docs/PROOF_GENERATION.md).
+
 ## Requirements
 
 - **.NET 10.0** or later, or
@@ -307,11 +327,12 @@ dotnet pack -c Release
 
 ## Documentation
 
-Detailed documentation will be available as the library develops. For now, refer to:
+For detailed information, see:
 
+- [Proof Generation Documentation](docs/PROOF_GENERATION.md) - Complete guide to generating and verifying Merkle proofs
+- [Streaming Documentation](docs/STREAMING.md) - Details on streaming tree construction for large datasets
 - XML documentation comments in the source code
 - IntelliSense in your IDE
-- [GitHub repository](https://github.com/runcodedad/merkletree)
 
 ## Contributing
 
@@ -339,12 +360,20 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   - Incremental level-by-level tree construction
   - Returns tree metadata (root hash, height, leaf count)
   - Produces identical results to in-memory construction
-- **Root serialization** (NEW)
+- **Root serialization**
   - Fixed-size binary serialization for Merkle roots
   - Deterministic format matching hash function size
   - Validated serialization and deserialization
   - Round-trip safe with defensive copying
-- Comprehensive test coverage (112+ tests)
+- **Merkle proof generation and verification** (NEW)
+  - Generate proofs for any leaf index
+  - Proof contains leaf value, index, tree height, sibling hashes, and orientation bits
+  - Built-in verification method to validate proofs against root hash
+  - Support for non-power-of-two trees with padding nodes
+  - Available for both in-memory `MerkleTree` and streaming `MerkleTreeStream`
+  - Async proof generation support for streaming scenarios
+  - Comprehensive test coverage for various tree sizes and edge cases
+- Comprehensive test coverage (145+ tests)
 
 ## Support
 
