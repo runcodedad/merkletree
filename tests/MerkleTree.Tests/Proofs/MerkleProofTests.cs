@@ -412,4 +412,62 @@ public class MerkleProofTests
         // At level 1, it's right child, so sibling is on left
         Assert.False(proof3.SiblingIsRight[1], "Leaf 3: sibling should be on left at level 1");
     }
+
+    [Fact]
+    public void Verify_WithNullSiblingHash_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var proof = new MerkleProof(
+            new byte[] { 1, 2, 3 },
+            0,
+            1,
+            new byte[][] { null! },
+            new bool[] { true });
+
+        var hashFunction = new Sha256HashFunction();
+        var rootHash = new byte[] { 1, 2, 3 };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => proof.Verify(rootHash, hashFunction));
+        Assert.Contains("null", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Verify_WithEmptySiblingHash_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var proof = new MerkleProof(
+            new byte[] { 1, 2, 3 },
+            0,
+            1,
+            new byte[][] { Array.Empty<byte>() },
+            new bool[] { true });
+
+        var hashFunction = new Sha256HashFunction();
+        var rootHash = new byte[] { 1, 2, 3 };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => proof.Verify(rootHash, hashFunction));
+        Assert.Contains("empty", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Verify_WithMultipleSiblingHashes_ValidatesEachOne()
+    {
+        // Arrange - Create a proof with multiple levels where second sibling is null
+        var proof = new MerkleProof(
+            new byte[] { 1, 2, 3 },
+            0,
+            2,
+            new byte[][] { new byte[] { 4, 5, 6 }, null! },
+            new bool[] { true, false });
+
+        var hashFunction = new Sha256HashFunction();
+        var rootHash = new byte[] { 1, 2, 3 };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => proof.Verify(rootHash, hashFunction));
+        Assert.Contains("level 1", exception.Message); // Second level (0-indexed)
+        Assert.Contains("null", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }
