@@ -1,4 +1,4 @@
-namespace MerkleTree;
+namespace MerkleTree.Core;
 
 /// <summary>
 /// Contains metadata about a constructed Merkle tree.

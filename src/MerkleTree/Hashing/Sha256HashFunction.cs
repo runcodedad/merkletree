@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 
-namespace MerkleTree;
+namespace MerkleTree.Hashing;
 
 /// <summary>
 /// SHA-256 hash function implementation using System.Security.Cryptography.

@@ -1,4 +1,4 @@
-namespace MerkleTree;
+namespace MerkleTree.Core;
 
 /// <summary>
 /// Represents a node in a Merkle tree structure.

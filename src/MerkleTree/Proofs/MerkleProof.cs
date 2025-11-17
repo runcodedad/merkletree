@@ -1,4 +1,6 @@
-namespace MerkleTree;
+using MerkleTree.Hashing;
+
+namespace MerkleTree.Proofs;
 
 /// <summary>
 /// Represents a Merkle proof that can be used to verify a leaf's inclusion in a Merkle tree.

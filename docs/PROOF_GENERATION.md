@@ -15,7 +15,9 @@ Merkle proofs allow verification that a specific leaf is part of a Merkle tree w
 For in-memory trees, proof generation is straightforward and efficient:
 
 ```csharp
-using MerkleTree;
+using MerkleTree.Core;
+using MerkleTree.Hashing;
+using MerkleTree.Proofs;
 using System.Text;
 
 var leafData = new List<byte[]>
@@ -62,6 +64,10 @@ The `GenerateProof` method uses an **optimized approach that only computes O(log
 - Memory usage: O(log n) instead of O(n)
 
 ```csharp
+using MerkleTree.Core;
+using MerkleTree.Hashing;
+using MerkleTree.Proofs;
+
 var builder = new MerkleTreeStream();
 
 // You need to know the leaf count beforehand
@@ -148,6 +154,8 @@ A `MerkleProof` object contains:
 To verify a proof:
 
 ```csharp
+using MerkleTree.Hashing;
+
 var hashFunction = new Sha256HashFunction();
 bool isValid = proof.Verify(expectedRootHash, hashFunction);
 ```
@@ -199,7 +207,9 @@ Common exceptions:
 ## Example: Complete Workflow
 
 ```csharp
-using MerkleTree;
+using MerkleTree.Core;
+using MerkleTree.Hashing;
+using MerkleTree.Proofs;
 using System.Text;
 
 // 1. Prepare data

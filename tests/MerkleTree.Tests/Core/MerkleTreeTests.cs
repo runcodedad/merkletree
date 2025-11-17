@@ -1,8 +1,11 @@
 using System.Security.Cryptography;
 using System.Text;
 using Xunit;
+using MerkleTree.Hashing;
+using MerkleTree.Proofs;
+using MerkleTreeClass = MerkleTree.Core.MerkleTree;
 
-namespace MerkleTree.Tests;
+namespace MerkleTree.Tests.Core;
 
 /// <summary>
 /// Tests for the MerkleTree class, focusing on non-power-of-two leaf support
@@ -31,7 +34,7 @@ public class MerkleTreeTests
     public void Constructor_WithNullLeafData_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new MerkleTree(null!));
+        Assert.Throws<ArgumentNullException>(() => new MerkleTreeClass(null!));
     }
 
     [Fact]
@@ -41,7 +44,7 @@ public class MerkleTreeTests
         var emptyData = new List<byte[]>();
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => new MerkleTree(emptyData));
+        Assert.Throws<ArgumentException>(() => new MerkleTreeClass(emptyData));
     }
 
     [Fact]
@@ -51,7 +54,7 @@ public class MerkleTreeTests
         var leafData = CreateLeafData("leaf1");
 
         // Act
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Assert
         Assert.NotNull(tree.Root);
@@ -67,7 +70,7 @@ public class MerkleTreeTests
         var leafData = CreateLeafData("leaf1", "leaf2");
 
         // Act
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Assert
         Assert.NotNull(tree.Root);
@@ -91,7 +94,7 @@ public class MerkleTreeTests
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
 
         // Act
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Assert
         Assert.NotNull(tree.Root);
@@ -126,7 +129,7 @@ public class MerkleTreeTests
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3", "leaf4");
 
         // Act
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Assert
         Assert.NotNull(tree.Root);
@@ -151,7 +154,7 @@ public class MerkleTreeTests
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3", "leaf4", "leaf5");
 
         // Act
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Assert
         Assert.NotNull(tree.Root);
@@ -174,8 +177,8 @@ public class MerkleTreeTests
         var leafData2 = CreateLeafData("leaf1", "leaf2", "leaf3");
 
         // Act
-        var tree1 = new MerkleTree(leafData1);
-        var tree2 = new MerkleTree(leafData2);
+        var tree1 = new MerkleTreeClass(leafData1);
+        var tree2 = new MerkleTreeClass(leafData2);
         var hash1 = tree1.GetRootHash();
         var hash2 = tree2.GetRootHash();
 
@@ -191,8 +194,8 @@ public class MerkleTreeTests
         var leafData2 = CreateLeafData("leaf1", "leaf2", "leaf4");
 
         // Act
-        var tree1 = new MerkleTree(leafData1);
-        var tree2 = new MerkleTree(leafData2);
+        var tree1 = new MerkleTreeClass(leafData1);
+        var tree2 = new MerkleTreeClass(leafData2);
         var hash1 = tree1.GetRootHash();
         var hash2 = tree2.GetRootHash();
 
@@ -208,8 +211,8 @@ public class MerkleTreeTests
         var leafData2 = CreateLeafData("leaf2", "leaf1");
 
         // Act
-        var tree1 = new MerkleTree(leafData1);
-        var tree2 = new MerkleTree(leafData2);
+        var tree1 = new MerkleTreeClass(leafData1);
+        var tree2 = new MerkleTreeClass(leafData2);
         var hash1 = tree1.GetRootHash();
         var hash2 = tree2.GetRootHash();
 
@@ -224,8 +227,8 @@ public class MerkleTreeTests
         var leafData = CreateLeafData("leaf1", "leaf2");
 
         // Act
-        var treeSHA256 = new MerkleTree(leafData, new Sha256HashFunction());
-        var treeSHA512 = new MerkleTree(leafData, new Sha512HashFunction());
+        var treeSHA256 = new MerkleTreeClass(leafData, new Sha256HashFunction());
+        var treeSHA512 = new MerkleTreeClass(leafData, new Sha512HashFunction());
 
         // Assert
         Assert.Equal("SHA-256", treeSHA256.HashFunction.Name);
@@ -240,7 +243,7 @@ public class MerkleTreeTests
         var leafData = CreateLeafData("l1", "l2", "l3", "l4", "l5", "l6", "l7");
 
         // Act
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Assert
         Assert.NotNull(tree.Root);
@@ -259,7 +262,7 @@ public class MerkleTreeTests
         var leafData = CreateLeafData("l1", "l2", "l3", "l4", "l5", "l6", "l7", "l8");
 
         // Act
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Assert
         Assert.NotNull(tree.Root);
@@ -287,8 +290,8 @@ public class MerkleTreeTests
             .ToList();
 
         // Act
-        var tree1 = new MerkleTree(leafData);
-        var tree2 = new MerkleTree(leafData);
+        var tree1 = new MerkleTreeClass(leafData);
+        var tree2 = new MerkleTreeClass(leafData);
 
         // Assert
         Assert.Equal(tree1.GetRootHash(), tree2.GetRootHash());
@@ -305,7 +308,7 @@ public class MerkleTreeTests
 
         // Act - build tree multiple times
         var trees = Enumerable.Range(0, 10)
-            .Select(_ => new MerkleTree(leafData.Select(d => d.ToArray()).ToList()))
+            .Select(_ => new MerkleTreeClass(leafData.Select(d => d.ToArray()).ToList()))
             .ToList();
 
         // Assert - all trees should have identical root hashes
@@ -325,13 +328,13 @@ public class MerkleTreeTests
 
         // Arrange
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
         var rootHash = tree.GetRootHash();
 
         // If we were duplicating the last leaf, the tree with 4 leaves where
         // the last two are identical should produce the same hash
         var leafDataWithDuplication = CreateLeafData("leaf1", "leaf2", "leaf3", "leaf3");
-        var treeWithDuplication = new MerkleTree(leafDataWithDuplication);
+        var treeWithDuplication = new MerkleTreeClass(leafDataWithDuplication);
         var hashWithDuplication = treeWithDuplication.GetRootHash();
 
         // Assert - these should be different because we use padding, not duplication
@@ -343,7 +346,7 @@ public class MerkleTreeTests
     {
         // Arrange
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Act
         var metadata = tree.GetMetadata();
@@ -361,7 +364,7 @@ public class MerkleTreeTests
     {
         // Arrange
         var leafData = CreateLeafData("leaf1");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Act
         var metadata = tree.GetMetadata();
@@ -377,7 +380,7 @@ public class MerkleTreeTests
     {
         // Arrange
         var leafData = CreateLeafData("l1", "l2", "l3", "l4");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Act
         var metadata = tree.GetMetadata();

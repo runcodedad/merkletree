@@ -2,7 +2,7 @@
 using Blake3;
 #endif
 
-namespace MerkleTree;
+namespace MerkleTree.Hashing;
 
 #if NET10_0_OR_GREATER
 /// <summary>

@@ -1,12 +1,13 @@
 using System.Text;
 using Xunit;
+using MerkleTree.Hashing;
 
-namespace MerkleTree.Tests;
+namespace MerkleTree.Tests.Hashing;
 
 /// <summary>
-/// Tests for the Sha256HashFunction class.
+/// Tests for the Blake3HashFunction class.
 /// </summary>
-public class Sha256HashFunctionTests
+public class Blake3HashFunctionTests
 {
     /// <summary>
     /// Helper method to create test data.
@@ -17,23 +18,23 @@ public class Sha256HashFunctionTests
     }
 
     [Fact]
-    public void Name_ReturnsSHA256()
+    public void Name_ReturnsBLAKE3()
     {
         // Arrange
-        var hashFunction = new Sha256HashFunction();
+        var hashFunction = new Blake3HashFunction();
 
         // Act
         var name = hashFunction.Name;
 
         // Assert
-        Assert.Equal("SHA-256", name);
+        Assert.Equal("BLAKE3", name);
     }
 
     [Fact]
     public void HashSizeInBytes_Returns32()
     {
         // Arrange
-        var hashFunction = new Sha256HashFunction();
+        var hashFunction = new Blake3HashFunction();
 
         // Act
         var size = hashFunction.HashSizeInBytes;
@@ -42,11 +43,12 @@ public class Sha256HashFunctionTests
         Assert.Equal(32, size);
     }
 
+#if NET10_0_OR_GREATER
     [Fact]
     public void ComputeHash_ProducesDeterministicOutput()
     {
         // Arrange
-        var hashFunction = new Sha256HashFunction();
+        var hashFunction = new Blake3HashFunction();
         var data = CreateTestData("test data");
 
         // Act
@@ -62,7 +64,7 @@ public class Sha256HashFunctionTests
     public void ComputeHash_DifferentDataProducesDifferentHash()
     {
         // Arrange
-        var hashFunction = new Sha256HashFunction();
+        var hashFunction = new Blake3HashFunction();
         var data1 = CreateTestData("test data 1");
         var data2 = CreateTestData("test data 2");
 
@@ -75,10 +77,28 @@ public class Sha256HashFunctionTests
     }
 
     [Fact]
+    public void ComputeHash_ProducesDifferentHashThanSha256()
+    {
+        // Arrange
+        var sha256 = new Sha256HashFunction();
+        var blake3 = new Blake3HashFunction();
+        var data = CreateTestData("test data");
+
+        // Act
+        var sha256Hash = sha256.ComputeHash(data);
+        var blake3Hash = blake3.ComputeHash(data);
+
+        // Assert
+        Assert.NotEqual(sha256Hash, blake3Hash);
+        Assert.Equal(32, sha256Hash.Length);
+        Assert.Equal(32, blake3Hash.Length);
+    }
+
+    [Fact]
     public void ComputeHash_ReturnsCorrectLength()
     {
         // Arrange
-        var hashFunction = new Sha256HashFunction();
+        var hashFunction = new Blake3HashFunction();
         var data = CreateTestData("test");
 
         // Act
@@ -87,4 +107,16 @@ public class Sha256HashFunctionTests
         // Assert
         Assert.Equal(hashFunction.HashSizeInBytes, hash.Length);
     }
+#else
+    [Fact]
+    public void ComputeHash_ThrowsPlatformNotSupportedOnNetStandard21()
+    {
+        // Arrange
+        var hashFunction = new Blake3HashFunction();
+        var data = CreateTestData("test data");
+
+        // Act & Assert
+        Assert.Throws<PlatformNotSupportedException>(() => hashFunction.ComputeHash(data));
+    }
+#endif
 }

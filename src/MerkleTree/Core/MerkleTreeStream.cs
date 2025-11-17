@@ -1,4 +1,7 @@
-namespace MerkleTree;
+using MerkleTree.Hashing;
+using MerkleTree.Proofs;
+
+namespace MerkleTree.Core;
 
 /// <summary>
 /// Builds Merkle trees from streaming/chunked input without requiring the entire dataset in memory.

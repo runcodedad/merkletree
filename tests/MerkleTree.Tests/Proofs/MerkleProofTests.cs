@@ -1,7 +1,10 @@
 using System.Text;
 using Xunit;
+using MerkleTree.Hashing;
+using MerkleTree.Proofs;
+using MerkleTreeClass = MerkleTree.Core.MerkleTree;
 
-namespace MerkleTree.Tests;
+namespace MerkleTree.Tests.Proofs;
 
 /// <summary>
 /// Tests for Merkle proof generation and verification.
@@ -21,7 +24,7 @@ public class MerkleProofTests
     {
         // Arrange
         var leafData = CreateLeafData("leaf1");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Act
         var proof = tree.GenerateProof(0);
@@ -40,7 +43,7 @@ public class MerkleProofTests
     {
         // Arrange
         var leafData = CreateLeafData("leaf1", "leaf2");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Act - Generate proof for first leaf
         var proof0 = tree.GenerateProof(0);
@@ -70,7 +73,7 @@ public class MerkleProofTests
     {
         // Arrange
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Act - Generate proof for first leaf
         var proof0 = tree.GenerateProof(0);
@@ -108,7 +111,7 @@ public class MerkleProofTests
     {
         // Arrange
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3", "leaf4");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Act & Assert - Generate proofs for all leaves
         for (int i = 0; i < 4; i++)
@@ -127,7 +130,7 @@ public class MerkleProofTests
     {
         // Arrange
         var leafData = CreateLeafData("l1", "l2", "l3", "l4", "l5", "l6", "l7");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Act & Assert - Generate proofs for all leaves
         for (int i = 0; i < 7; i++)
@@ -146,7 +149,7 @@ public class MerkleProofTests
     {
         // Arrange
         var leafData = CreateLeafData("leaf1", "leaf2");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Act & Assert
         Assert.Throws<ArgumentOutOfRangeException>(() => tree.GenerateProof(-1));
@@ -159,7 +162,7 @@ public class MerkleProofTests
     {
         // Arrange
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
         var rootHash = tree.GetRootHash();
         var hashFunction = new Sha256HashFunction();
 
@@ -179,7 +182,7 @@ public class MerkleProofTests
     {
         // Arrange
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
         var rootHash = tree.GetRootHash();
         var hashFunction = new Sha256HashFunction();
 
@@ -205,10 +208,10 @@ public class MerkleProofTests
     {
         // Arrange
         var leafData1 = CreateLeafData("leaf1", "leaf2", "leaf3");
-        var tree1 = new MerkleTree(leafData1);
+        var tree1 = new MerkleTreeClass(leafData1);
         
         var leafData2 = CreateLeafData("leaf4", "leaf5", "leaf6");
-        var tree2 = new MerkleTree(leafData2);
+        var tree2 = new MerkleTreeClass(leafData2);
         
         var hashFunction = new Sha256HashFunction();
 
@@ -225,8 +228,8 @@ public class MerkleProofTests
     {
         // Arrange
         var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
-        var treeSHA256 = new MerkleTree(leafData, new Sha256HashFunction());
-        var treeSHA512 = new MerkleTree(leafData, new Sha512HashFunction());
+        var treeSHA256 = new MerkleTreeClass(leafData, new Sha256HashFunction());
+        var treeSHA512 = new MerkleTreeClass(leafData, new Sha512HashFunction());
 
         // Act - Generate proof from SHA256 tree
         var proof = treeSHA256.GenerateProof(1);
@@ -249,7 +252,7 @@ public class MerkleProofTests
         var leafData = Enumerable.Range(0, 100)
             .Select(i => Encoding.UTF8.GetBytes($"leaf{i}"))
             .ToList();
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
         var rootHash = tree.GetRootHash();
         var hashFunction = new Sha256HashFunction();
 
@@ -380,7 +383,7 @@ public class MerkleProofTests
     {
         // Arrange - Tree with 4 leaves has predictable structure
         var leafData = CreateLeafData("leaf0", "leaf1", "leaf2", "leaf3");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Act - Generate proofs
         var proof0 = tree.GenerateProof(0); // Left child at both levels

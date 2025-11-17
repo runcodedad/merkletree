@@ -1,7 +1,10 @@
 using System.Text;
 using Xunit;
+using MerkleTree.Core;
+using MerkleTree.Hashing;
+using MerkleTreeClass = MerkleTree.Core.MerkleTree;
 
-namespace MerkleTree.Tests;
+namespace MerkleTree.Tests.Core;
 
 /// <summary>
 /// Tests for root serialization and deserialization functionality.
@@ -21,7 +24,7 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("test1", "test2", "test3");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
         var root = tree.Root;
 
         // Act
@@ -38,8 +41,8 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("data1", "data2", "data3");
-        var tree1 = new MerkleTree(leafData);
-        var tree2 = new MerkleTree(leafData);
+        var tree1 = new MerkleTreeClass(leafData);
+        var tree2 = new MerkleTreeClass(leafData);
 
         // Act
         var serialized1 = tree1.Root.Serialize();
@@ -64,7 +67,7 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("test1", "test2");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
         var originalHash = tree.GetRootHash();
 
         // Act
@@ -98,7 +101,7 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("data1", "data2", "data3", "data4");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
         var originalRoot = tree.Root;
 
         // Act
@@ -114,9 +117,9 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("test1", "test2");
-        var treeSha256 = new MerkleTree(leafData, new Sha256HashFunction());
-        var treeSha512 = new MerkleTree(leafData, new Sha512HashFunction());
-        var treeBlake3 = new MerkleTree(leafData, new Blake3HashFunction());
+        var treeSha256 = new MerkleTreeClass(leafData, new Sha256HashFunction());
+        var treeSha512 = new MerkleTreeClass(leafData, new Sha512HashFunction());
+        var treeBlake3 = new MerkleTreeClass(leafData, new Blake3HashFunction());
 
         // Act
         var serializedSha256 = treeSha256.Root.Serialize();
@@ -141,7 +144,7 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("data1", "data2");
-        var tree = new MerkleTree(leafData, new Sha512HashFunction());
+        var tree = new MerkleTreeClass(leafData, new Sha512HashFunction());
         var originalRoot = tree.Root;
 
         // Act
@@ -158,7 +161,7 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("data1", "data2", "data3");
-        var tree = new MerkleTree(leafData, new Blake3HashFunction());
+        var tree = new MerkleTreeClass(leafData, new Blake3HashFunction());
         var originalRoot = tree.Root;
 
         // Act
@@ -175,7 +178,7 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("test1", "test2", "test3");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
         var root = tree.Root;
 
         // Act
@@ -193,7 +196,7 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("data1");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
         var originalHash = tree.GetRootHash();
 
         // Act
@@ -211,7 +214,7 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("test1", "test2");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
         var metadata = tree.GetMetadata();
 
         // Act
@@ -228,7 +231,7 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("test1", "test2", "test3");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
         var metadata = tree.GetMetadata();
         var serialized = metadata.SerializeRoot();
 
@@ -245,7 +248,7 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("data1", "data2", "data3", "data4", "data5");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
         var metadata = tree.GetMetadata();
 
         // Act
@@ -261,7 +264,7 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("single");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Act
         var serialized = tree.Root.Serialize();
@@ -277,7 +280,7 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("a", "b", "c", "d", "e", "f", "g");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Act
         var serialized = tree.Root.Serialize();
@@ -293,7 +296,7 @@ public class RootSerializationTests
     {
         // Arrange
         var leafData = CreateLeafData("1", "2", "3", "4", "5", "6", "7", "8");
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Act
         var serialized = tree.Root.Serialize();
