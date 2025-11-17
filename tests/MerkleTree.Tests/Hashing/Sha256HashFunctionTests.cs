@@ -1,12 +1,13 @@
 using System.Text;
 using Xunit;
+using MerkleTree.Hashing;
 
-namespace MerkleTree.Tests;
+namespace MerkleTree.Tests.Hashing;
 
 /// <summary>
-/// Tests for the Sha512HashFunction class.
+/// Tests for the Sha256HashFunction class.
 /// </summary>
-public class Sha512HashFunctionTests
+public class Sha256HashFunctionTests
 {
     /// <summary>
     /// Helper method to create test data.
@@ -17,36 +18,36 @@ public class Sha512HashFunctionTests
     }
 
     [Fact]
-    public void Name_ReturnsSHA512()
+    public void Name_ReturnsSHA256()
     {
         // Arrange
-        var hashFunction = new Sha512HashFunction();
+        var hashFunction = new Sha256HashFunction();
 
         // Act
         var name = hashFunction.Name;
 
         // Assert
-        Assert.Equal("SHA-512", name);
+        Assert.Equal("SHA-256", name);
     }
 
     [Fact]
-    public void HashSizeInBytes_Returns64()
+    public void HashSizeInBytes_Returns32()
     {
         // Arrange
-        var hashFunction = new Sha512HashFunction();
+        var hashFunction = new Sha256HashFunction();
 
         // Act
         var size = hashFunction.HashSizeInBytes;
 
         // Assert
-        Assert.Equal(64, size);
+        Assert.Equal(32, size);
     }
 
     [Fact]
     public void ComputeHash_ProducesDeterministicOutput()
     {
         // Arrange
-        var hashFunction = new Sha512HashFunction();
+        var hashFunction = new Sha256HashFunction();
         var data = CreateTestData("test data");
 
         // Act
@@ -55,14 +56,14 @@ public class Sha512HashFunctionTests
 
         // Assert
         Assert.Equal(hash1, hash2);
-        Assert.Equal(64, hash1.Length);
+        Assert.Equal(32, hash1.Length);
     }
 
     [Fact]
     public void ComputeHash_DifferentDataProducesDifferentHash()
     {
         // Arrange
-        var hashFunction = new Sha512HashFunction();
+        var hashFunction = new Sha256HashFunction();
         var data1 = CreateTestData("test data 1");
         var data2 = CreateTestData("test data 2");
 
@@ -78,7 +79,7 @@ public class Sha512HashFunctionTests
     public void ComputeHash_ReturnsCorrectLength()
     {
         // Arrange
-        var hashFunction = new Sha512HashFunction();
+        var hashFunction = new Sha256HashFunction();
         var data = CreateTestData("test");
 
         // Act

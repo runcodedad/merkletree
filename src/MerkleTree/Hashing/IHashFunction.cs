@@ -1,4 +1,4 @@
-namespace MerkleTree;
+namespace MerkleTree.Hashing;
 
 /// <summary>
 /// Defines an abstraction for cryptographic hash functions used in Merkle tree construction.

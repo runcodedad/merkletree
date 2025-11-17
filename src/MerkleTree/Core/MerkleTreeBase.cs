@@ -1,4 +1,6 @@
-namespace MerkleTree;
+using MerkleTree.Hashing;
+
+namespace MerkleTree.Core;
 
 /// <summary>
 /// Base class providing shared functionality for Merkle tree construction.

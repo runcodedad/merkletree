@@ -1,6 +1,9 @@
 using System.Text;
+using MerkleTree.Core;
+using MerkleTree.Hashing;
+using MerkleTreeClass = MerkleTree.Core.MerkleTree;
 
-namespace MerkleTree.Tests;
+namespace MerkleTree.Tests.Core;
 
 /// <summary>
 /// Tests for the MerkleTreeBuilder class, focusing on streaming/chunked input support.
@@ -130,7 +133,7 @@ public class MerkleTreeStreamTests
 
         // Act
         var asyncMetadata = await builder.BuildAsync(leafDataAsync);
-        var originalTree = new MerkleTree(leafDataSync);
+        var originalTree = new MerkleTreeClass(leafDataSync);
         var originalRootHash = originalTree.GetRootHash();
 
         // Assert

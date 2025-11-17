@@ -45,7 +45,8 @@ Install-Package MerkleTree
 ### In-Memory Merkle Tree
 
 ```csharp
-using MerkleTree;
+using MerkleTree.Core;
+using MerkleTree.Hashing;
 using System.Text;
 
 // Create leaf data from your input
@@ -77,7 +78,8 @@ var treeSHA512 = new MerkleTree(leafData, new Sha512HashFunction());
 For large datasets that don't fit in memory, use the streaming builder:
 
 ```csharp
-using MerkleTree;
+using MerkleTree.Core;
+using MerkleTree.Hashing;
 using System.Text;
 
 // Create a builder
@@ -223,7 +225,8 @@ The library provides deterministic binary serialization for Merkle tree roots, e
 ### Basic Usage
 
 ```csharp
-using MerkleTree;
+using MerkleTree.Core;
+using MerkleTree.Hashing;
 using System.Text;
 
 var leafData = new List<byte[]>
@@ -286,6 +289,10 @@ The serialization format is simply the raw hash bytes, providing minimal overhea
 Generate and verify Merkle proofs to prove that a specific leaf is part of the tree:
 
 ```csharp
+using MerkleTree.Core;
+using MerkleTree.Hashing;
+using MerkleTree.Proofs;
+
 var tree = new MerkleTree(leafData);
 var proof = tree.GenerateProof(leafIndex: 1);
 

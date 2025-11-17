@@ -11,6 +11,8 @@ The `MerkleTreeStream` class enables building Merkle trees from datasets that ex
 ### 1. Multiple Input Methods
 
 ```csharp
+using MerkleTree.Core;
+
 var builder = new MerkleTreeStream();
 
 // Synchronous streaming
@@ -35,6 +37,8 @@ var metadata3 = builder.BuildInBatches(IEnumerable<byte[]> leaves, int batchSize
 The streaming builder produces identical root hashes to the in-memory `MerkleTree` class:
 
 ```csharp
+using MerkleTree.Core;
+
 var leafData = GetLeaves();
 
 // Streaming approach
@@ -89,6 +93,8 @@ This ensures:
 Process multi-gigabyte files with fixed-size records:
 
 ```csharp
+using MerkleTree.Core;
+
 IEnumerable<byte[]> ReadFileRecords(string path, int recordSize)
 {
     using var stream = File.OpenRead(path);
@@ -110,6 +116,8 @@ var metadata = builder.BuildInBatches(records, batchSize: 1000);
 Build trees from database results without loading all rows:
 
 ```csharp
+using MerkleTree.Core;
+
 async IAsyncEnumerable<byte[]> StreamDatabaseRecords(DbConnection conn)
 {
     await using var cmd = conn.CreateCommand();
@@ -132,6 +140,8 @@ var metadata = await builder.BuildAsync(records);
 Process data as it arrives over the network:
 
 ```csharp
+using MerkleTree.Core;
+
 async IAsyncEnumerable<byte[]> StreamNetworkData(Stream networkStream)
 {
     var buffer = new byte[32];
@@ -191,6 +201,9 @@ All tests verify that streaming produces identical results to the in-memory impl
 ### MerkleTreeStream
 
 ```csharp
+using MerkleTree.Core;
+using MerkleTree.Hashing;
+
 public class MerkleTreeStream
 {
     // Constructor
@@ -210,6 +223,8 @@ public class MerkleTreeStream
 ### MerkleTreeMetadata
 
 ```csharp
+using MerkleTree.Core;
+
 public class MerkleTreeMetadata
 {
     // Constructor
@@ -226,6 +241,8 @@ public class MerkleTreeMetadata
 ### MerkleTree
 
 ```csharp
+using MerkleTree.Core;
+
 public class MerkleTree
 {
     // Get metadata from an in-memory tree

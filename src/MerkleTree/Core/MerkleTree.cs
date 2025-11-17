@@ -1,4 +1,7 @@
-namespace MerkleTree;
+using MerkleTree.Hashing;
+using MerkleTree.Proofs;
+
+namespace MerkleTree.Core;
 
 /// <summary>
 /// Represents a binary Merkle tree structure with support for non-power-of-two leaf counts.

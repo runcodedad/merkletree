@@ -1,7 +1,9 @@
 using System.Text;
 using Xunit;
+using MerkleTree.Hashing;
+using MerkleTreeClass = MerkleTree.Core.MerkleTree;
 
-namespace MerkleTree.Tests;
+namespace MerkleTree.Tests.Hashing;
 
 /// <summary>
 /// Tests for the IHashFunction interface.
@@ -40,7 +42,7 @@ public class IHashFunctionTests
         };
 
         // Act
-        var tree = new MerkleTree(leafData, hashFunction);
+        var tree = new MerkleTreeClass(leafData, hashFunction);
 
         // Assert
         Assert.NotNull(tree.HashFunction);
@@ -61,7 +63,7 @@ public class IHashFunctionTests
         };
 
         // Act
-        var tree = new MerkleTree(leafData, hashFunction);
+        var tree = new MerkleTreeClass(leafData, hashFunction);
 
         // Assert
         Assert.NotNull(tree.HashFunction);
@@ -83,8 +85,8 @@ public class IHashFunctionTests
         };
 
         // Act
-        var treeSha256 = new MerkleTree(leafData, sha256);
-        var treeBlake3 = new MerkleTree(leafData, blake3);
+        var treeSha256 = new MerkleTreeClass(leafData, sha256);
+        var treeBlake3 = new MerkleTreeClass(leafData, blake3);
 
         // Assert
         Assert.NotEqual(treeSha256.GetRootHash(), treeBlake3.GetRootHash());
@@ -102,7 +104,7 @@ public class IHashFunctionTests
         };
 
         // Act
-        var tree = new MerkleTree(leafData);
+        var tree = new MerkleTreeClass(leafData);
 
         // Assert
         Assert.NotNull(tree.HashFunction);
@@ -126,8 +128,8 @@ public class IHashFunctionTests
         };
 
         // Act - Create trees with different hash functions
-        var tree1 = new MerkleTree(leafData, sha256);
-        var tree2 = new MerkleTree(leafData, sha256);
+        var tree1 = new MerkleTreeClass(leafData, sha256);
+        var tree2 = new MerkleTreeClass(leafData, sha256);
 
         // Assert - Same hash function produces same results
         Assert.Equal(tree1.GetRootHash(), tree2.GetRootHash());
