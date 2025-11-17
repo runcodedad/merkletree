@@ -106,6 +106,7 @@ public class MerkleProof
     /// <param name="hashFunction">The hash function to use for verification.</param>
     /// <returns>True if the proof is valid and produces the expected root hash; otherwise, false.</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when sibling hashes are null or empty.</exception>
     public bool Verify(byte[] expectedRootHash, IHashFunction hashFunction)
     {
         if (expectedRootHash == null)
@@ -120,6 +121,13 @@ public class MerkleProof
         for (int i = 0; i < TreeHeight; i++)
         {
             var siblingHash = SiblingHashes[i];
+            
+            // Validate sibling hash is well-formed
+            if (siblingHash == null)
+                throw new InvalidOperationException($"Sibling hash at level {i} is null.");
+            if (siblingHash.Length == 0)
+                throw new InvalidOperationException($"Sibling hash at level {i} is empty.");
+            
             var isRight = SiblingIsRight[i];
 
             // Compute parent hash: Hash(left || right)

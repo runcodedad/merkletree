@@ -412,4 +412,163 @@ public class MerkleProofTests
         // At level 1, it's right child, so sibling is on left
         Assert.False(proof3.SiblingIsRight[1], "Leaf 3: sibling should be on left at level 1");
     }
+
+    [Fact]
+    public void Verify_WithNullSiblingHash_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var proof = new MerkleProof(
+            new byte[] { 1, 2, 3 },
+            0,
+            1,
+            new byte[][] { null! },
+            new bool[] { true });
+
+        var hashFunction = new Sha256HashFunction();
+        var rootHash = new byte[] { 1, 2, 3 };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => proof.Verify(rootHash, hashFunction));
+        Assert.Contains("null", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Verify_WithEmptySiblingHash_ThrowsInvalidOperationException()
+    {
+        // Arrange
+        var proof = new MerkleProof(
+            new byte[] { 1, 2, 3 },
+            0,
+            1,
+            new byte[][] { Array.Empty<byte>() },
+            new bool[] { true });
+
+        var hashFunction = new Sha256HashFunction();
+        var rootHash = new byte[] { 1, 2, 3 };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => proof.Verify(rootHash, hashFunction));
+        Assert.Contains("empty", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Verify_WithMultipleSiblingHashes_ValidatesEachOne()
+    {
+        // Arrange - Create a proof with multiple levels where second sibling is null
+        var proof = new MerkleProof(
+            new byte[] { 1, 2, 3 },
+            0,
+            2,
+            new byte[][] { new byte[] { 4, 5, 6 }, null! },
+            new bool[] { true, false });
+
+        var hashFunction = new Sha256HashFunction();
+        var rootHash = new byte[] { 1, 2, 3 };
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => proof.Verify(rootHash, hashFunction));
+        Assert.Contains("level 1", exception.Message); // Second level (0-indexed)
+        Assert.Contains("null", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Verify_IsDeterministic_SameInputsProduceSameResult()
+    {
+        // Arrange
+        var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
+        var tree = new MerkleTreeClass(leafData);
+        var rootHash = tree.GetRootHash();
+        var hashFunction = new Sha256HashFunction();
+        var proof = tree.GenerateProof(1);
+
+        // Act - Verify the same proof multiple times
+        var result1 = proof.Verify(rootHash, hashFunction);
+        var result2 = proof.Verify(rootHash, hashFunction);
+        var result3 = proof.Verify(rootHash, hashFunction);
+
+        // Assert - All results should be identical
+        Assert.True(result1);
+        Assert.Equal(result1, result2);
+        Assert.Equal(result2, result3);
+    }
+
+    [Fact]
+    public void Verify_HasNoSideEffects_ProofUnchangedAfterVerification()
+    {
+        // Arrange
+        var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
+        var tree = new MerkleTreeClass(leafData);
+        var rootHash = tree.GetRootHash();
+        var hashFunction = new Sha256HashFunction();
+        var proof = tree.GenerateProof(1);
+
+        // Capture original state
+        var originalLeafValue = proof.LeafValue.ToArray();
+        var originalLeafIndex = proof.LeafIndex;
+        var originalTreeHeight = proof.TreeHeight;
+        var originalSiblingHashes = proof.SiblingHashes.Select(h => h.ToArray()).ToArray();
+        var originalSiblingIsRight = proof.SiblingIsRight.ToArray();
+
+        // Act - Verify the proof
+        proof.Verify(rootHash, hashFunction);
+
+        // Assert - Proof properties should remain unchanged
+        Assert.Equal(originalLeafValue, proof.LeafValue);
+        Assert.Equal(originalLeafIndex, proof.LeafIndex);
+        Assert.Equal(originalTreeHeight, proof.TreeHeight);
+        Assert.Equal(originalSiblingHashes.Length, proof.SiblingHashes.Length);
+        for (int i = 0; i < originalSiblingHashes.Length; i++)
+        {
+            Assert.Equal(originalSiblingHashes[i], proof.SiblingHashes[i]);
+        }
+        Assert.Equal(originalSiblingIsRight, proof.SiblingIsRight);
+    }
+
+    [Fact]
+    public void Verify_WithIdenticalProofObjects_ProducesSameResult()
+    {
+        // Arrange
+        var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
+        var tree = new MerkleTreeClass(leafData);
+        var rootHash = tree.GetRootHash();
+        var hashFunction = new Sha256HashFunction();
+
+        // Create two identical proof objects from same generation
+        var proof1 = tree.GenerateProof(1);
+        var proof2 = tree.GenerateProof(1);
+
+        // Act
+        var result1 = proof1.Verify(rootHash, hashFunction);
+        var result2 = proof2.Verify(rootHash, hashFunction);
+
+        // Assert - Both should produce identical results
+        Assert.Equal(result1, result2);
+        Assert.True(result1);
+    }
+
+    [Fact]
+    public void Verify_WithSameDataDifferentHashFunctions_ProducesDifferentResults()
+    {
+        // Arrange
+        var leafData = CreateLeafData("leaf1", "leaf2", "leaf3");
+        
+        // Create trees with different hash functions
+        var treeSHA256 = new MerkleTreeClass(leafData, new Sha256HashFunction());
+        var treeSHA512 = new MerkleTreeClass(leafData, new Sha512HashFunction());
+
+        // Generate proofs from respective trees
+        var proofSHA256 = treeSHA256.GenerateProof(1);
+        var proofSHA512 = treeSHA512.GenerateProof(1);
+
+        // Act - Verify each proof with its matching hash function
+        var validSHA256 = proofSHA256.Verify(treeSHA256.GetRootHash(), new Sha256HashFunction());
+        var validSHA512 = proofSHA512.Verify(treeSHA512.GetRootHash(), new Sha512HashFunction());
+
+        // Assert
+        Assert.True(validSHA256, "SHA256 proof should be valid with SHA256 hash function");
+        Assert.True(validSHA512, "SHA512 proof should be valid with SHA512 hash function");
+        
+        // Different hash functions produce different root hashes
+        Assert.NotEqual(treeSHA256.GetRootHash(), treeSHA512.GetRootHash());
+    }
 }
