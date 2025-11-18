@@ -37,11 +37,13 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
     }
 
     /// <summary>
-    /// Builds a Merkle tree from a stream of leaf data asynchronously.
+    /// Builds a Merkle tree from a stream of leaf data asynchronously with optional file-based caching.
     /// </summary>
     /// <param name="leafData">An async enumerable of leaf data.</param>
+    /// <param name="cacheFilePath">Optional path to save cache file. If provided, top levels are cached to this file.</param>
+    /// <param name="topLevelsToCache">Number of top levels to cache (default 5). Only used if cacheFilePath is provided.</param>
     /// <param name="cancellationToken">A cancellation token to cancel the operation.</param>
-    /// <returns>A task that returns the Merkle tree metadata including root hash, height, and leaf count.</returns>
+    /// <returns>A task that returns the Merkle tree metadata.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="leafData"/> is null.</exception>
     /// <exception cref="InvalidOperationException">Thrown when no leaves are provided.</exception>
     /// <remarks>
@@ -50,23 +52,34 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
     /// It's designed to handle datasets of any size, including 500GB+ files with billions of leaves.
     /// </para>
     /// <para>
-    /// The algorithm:
-    /// 1. Streams through leaf data, writing hashes to a temporary file (Level 0)
-    /// 2. Reads level file in chunks, computes parent hashes, writes to next level file
-    /// 3. Continues until reaching the root
-    /// 4. Cleans up temporary files automatically
+    /// If cacheFilePath is provided, the method caches selected top levels to a file during tree construction.
+    /// The cache is built incrementally without requiring extra memory or multiple passes. Cached levels can be
+    /// loaded later to accelerate proof generation.
+    /// </para>
+    /// <para>
+    /// The caching uses the same file-based approach as the tree building, so it doesn't increase memory usage.
+    /// Top levels are kept as separate files and packaged into a cache file at the end.
     /// </para>
     /// </remarks>
     public async Task<MerkleTreeMetadata> BuildAsync(
         IAsyncEnumerable<byte[]> leafData,
+        string? cacheFilePath = null,
+        int topLevelsToCache = 5,
         CancellationToken cancellationToken = default)
     {
         if (leafData == null)
             throw new ArgumentNullException(nameof(leafData));
 
+        if (topLevelsToCache < 0)
+            throw new ArgumentException("Top levels to cache must be non-negative.", nameof(topLevelsToCache));
+
         // Create temporary directory for level files
         string tempDir = Path.Combine(Path.GetTempPath(), $"merkletree_{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
+
+        // Track which level files to keep for caching
+        List<(int level, string filePath, long nodeCount)> levelsToCache = new List<(int, string, long)>();
+        bool enableCaching = !string.IsNullOrEmpty(cacheFilePath) && topLevelsToCache > 0;
 
         try
         {
@@ -93,153 +106,21 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
             int height = 0;
             long currentLevelSize = leafCount;
             string currentLevelFile = level0File;
+
+            // Track all level files for potential cleanup
+            var allLevelFiles = new List<string> { level0File };
 
             while (currentLevelSize > 1)
             {
                 string nextLevelFile = Path.Combine(tempDir, $"level_{height + 1}.dat");
                 long nextLevelSize = await BuildNextLevelFromFileAsync(currentLevelFile, nextLevelFile, currentLevelSize, cancellationToken);
                 
-                // Clean up previous level file (except level 0 which we might need for proofs)
-                if (height > 0)
-                {
-                    File.Delete(currentLevelFile);
-                }
+                allLevelFiles.Add(nextLevelFile);
                 
-                currentLevelFile = nextLevelFile;
-                currentLevelSize = nextLevelSize;
-                height++;
-            }
-
-            // Read the root hash
-            byte[] rootHash;
-            using (var fileStream = new FileStream(currentLevelFile, FileMode.Open, FileAccess.Read, FileShare.Read))
-            using (var reader = new BinaryReader(fileStream))
-            {
-                int hashLength = reader.ReadInt32();
-                rootHash = reader.ReadBytes(hashLength);
-            }
-
-            var rootNode = new MerkleTreeNode(rootHash);
-            return new MerkleTreeMetadata(rootNode, height, leafCount);
-        }
-        finally
-        {
-            // Clean up all temporary files
-            try
-            {
-                if (Directory.Exists(tempDir))
+                // Track this level for caching if needed (we'll determine which levels after we know the height)
+                if (enableCaching)
                 {
-                    Directory.Delete(tempDir, recursive: true);
-                }
-            }
-            catch
-            {
-                // Best effort cleanup - ignore errors
-            }
-        }
-    }
-
-    /// <summary>
-    /// Builds a Merkle tree from a stream of leaf data asynchronously with optional caching.
-    /// </summary>
-    /// <param name="leafData">An async enumerable of leaf data.</param>
-    /// <param name="cacheConfig">Optional cache configuration. If provided, the specified levels are cached in memory.</param>
-    /// <param name="cancellationToken">A cancellation token to cancel the operation.</param>
-    /// <returns>A task that returns a tuple containing the Merkle tree metadata and optional cache data.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="leafData"/> is null.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when no leaves are provided.</exception>
-    /// <remarks>
-    /// <para>
-    /// This method builds a Merkle tree while optionally caching selected levels in memory.
-    /// Caching is particularly useful when generating multiple proofs from the same large dataset,
-    /// as cached levels don't need to be recomputed.
-    /// </para>
-    /// <para>
-    /// The cache is built incrementally during tree construction by storing the hashes of nodes
-    /// at the configured levels. This avoids the need to keep temporary files or re-stream the data
-    /// when generating proofs later.
-    /// </para>
-    /// </remarks>
-    public async Task<(MerkleTreeMetadata metadata, CacheData? cache)> BuildAsync(
-        IAsyncEnumerable<byte[]> leafData,
-        CacheConfiguration? cacheConfig,
-        CancellationToken cancellationToken = default)
-    {
-        if (leafData == null)
-            throw new ArgumentNullException(nameof(leafData));
-
-        // Create temporary directory for level files
-        string tempDir = Path.Combine(Path.GetTempPath(), $"merkletree_{Guid.NewGuid():N}");
-        Directory.CreateDirectory(tempDir);
-
-        // Dictionary to store cached levels
-        Dictionary<int, List<byte[]>>? cachedLevels = null;
-        if (cacheConfig?.IsEnabled == true)
-        {
-            cachedLevels = new Dictionary<int, List<byte[]>>();
-        }
-
-        try
-        {
-            // Build Level 0 by streaming and hashing leaves to a temp file
-            string level0File = Path.Combine(tempDir, "level_0.dat");
-            long leafCount = 0;
-            List<byte[]>? level0Cache = null;
-
-            if (cachedLevels != null && cacheConfig!.StartLevel == 0)
-            {
-                level0Cache = new List<byte[]>();
-            }
-
-            await using (var fileStream = new FileStream(level0File, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
-            await using (var writer = new BinaryWriter(fileStream))
-            {
-                await foreach (var leaf in leafData.WithCancellation(cancellationToken))
-                {
-                    var hash = ComputeHash(leaf);
-                    writer.Write(hash.Length);
-                    writer.Write(hash);
-                    leafCount++;
-
-                    // Cache level 0 if requested
-                    level0Cache?.Add(hash);
-                }
-            }
-
-            if (level0Cache != null)
-            {
-                cachedLevels![0] = level0Cache;
-            }
-
-            if (leafCount == 0)
-                throw new InvalidOperationException("At least one leaf is required to build a Merkle tree.");
-
-            // Build tree bottom-up level by level using temp files
-            int height = 0;
-            long currentLevelSize = leafCount;
-            string currentLevelFile = level0File;
-
-            while (currentLevelSize > 1)
-            {
-                string nextLevelFile = Path.Combine(tempDir, $"level_{height + 1}.dat");
-                
-                // Check if we should cache this level
-                bool shouldCacheNextLevel = cachedLevels != null && 
-                    cacheConfig!.StartLevel <= (height + 1) && 
-                    (height + 1) <= cacheConfig.EndLevel;
-
-                long nextLevelSize = await BuildNextLevelFromFileAsync(
-                    currentLevelFile, 
-                    nextLevelFile, 
-                    currentLevelSize, 
-                    shouldCacheNextLevel ? cachedLevels : null,
-                    height + 1,
-                    cancellationToken);
-                
-                // Clean up previous level file (except level 0 which we might need for proofs)
-                if (height > 0)
-                {
-                    File.Delete(currentLevelFile);
+                    levelsToCache.Add((height + 1, nextLevelFile, nextLevelSize));
                 }
                 
                 currentLevelFile = nextLevelFile;
@@ -259,14 +140,17 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
             var rootNode = new MerkleTreeNode(rootHash);
             var metadata = new MerkleTreeMetadata(rootNode, height, leafCount);
 
-            // Build CacheData if we cached any levels
-            CacheData? cache = null;
-            if (cachedLevels != null && cachedLevels.Count > 0)
+            // Build cache file if caching is enabled
+            if (enableCaching && levelsToCache.Count > 0)
             {
-                cache = BuildCacheData(cachedLevels, cacheConfig!, height);
+                // Determine which levels to cache (top N levels, but not the root)
+                int startLevel = Math.Max(0, height - topLevelsToCache);
+                int endLevel = height - 1; // Don't cache the root itself
+
+                await BuildCacheFileAsync(levelsToCache, startLevel, endLevel, height, cacheFilePath!, cancellationToken);
             }
 
-            return (metadata, cache);
+            return metadata;
         }
         finally
         {
@@ -286,24 +170,55 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
     }
 
     /// <summary>
-    /// Builds cache data from collected level information.
+    /// Builds a cache file from level files on disk.
     /// </summary>
-    private CacheData BuildCacheData(Dictionary<int, List<byte[]>> cachedLevels, CacheConfiguration cacheConfig, int treeHeight)
+    private async Task BuildCacheFileAsync(
+        List<(int level, string filePath, long nodeCount)> allLevels,
+        int startLevel,
+        int endLevel,
+        int treeHeight,
+        string cacheFilePath,
+        CancellationToken cancellationToken)
     {
-        var metadata = new CacheMetadata(
-            treeHeight,
-            _hashFunction.Name,
-            _hashFunction.HashSizeInBytes,
-            cacheConfig.StartLevel,
-            cacheConfig.EndLevel);
-
+        // Read the selected levels from disk and build cache
         var levels = new Dictionary<int, CachedLevel>();
-        foreach (var kvp in cachedLevels)
+
+        foreach (var (level, filePath, nodeCount) in allLevels)
         {
-            levels[kvp.Key] = new CachedLevel(kvp.Key, kvp.Value.ToArray());
+            if (level >= startLevel && level <= endLevel)
+            {
+                // Read all nodes from this level file
+                var nodes = new List<byte[]>();
+                
+                await using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
+                using (var reader = new BinaryReader(fileStream))
+                {
+                    for (long i = 0; i < nodeCount; i++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        int hashLength = reader.ReadInt32();
+                        byte[] hash = reader.ReadBytes(hashLength);
+                        nodes.Add(hash);
+                    }
+                }
+
+                levels[level] = new CachedLevel(level, nodes.ToArray());
+            }
         }
 
-        return new CacheData(metadata, levels);
+        if (levels.Count > 0)
+        {
+            var cacheMetadata = new CacheMetadata(
+                treeHeight,
+                _hashFunction.Name,
+                _hashFunction.HashSizeInBytes,
+                startLevel,
+                endLevel);
+
+            var cacheData = new CacheData(cacheMetadata, levels);
+            var serialized = CacheSerializer.Serialize(cacheData);
+            await File.WriteAllBytesAsync(cacheFilePath, serialized, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -316,35 +231,7 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
     /// <returns>The number of nodes in the next level.</returns>
     private async Task<long> BuildNextLevelFromFileAsync(string currentLevelFile, string nextLevelFile, long currentLevelSize, CancellationToken cancellationToken)
     {
-        return await BuildNextLevelFromFileAsync(currentLevelFile, nextLevelFile, currentLevelSize, null, 0, cancellationToken);
-    }
-
-    /// <summary>
-    /// Builds the next level of the tree by reading from a file and writing to another file asynchronously with optional caching.
-    /// </summary>
-    /// <param name="currentLevelFile">Path to the file containing current level hashes.</param>
-    /// <param name="nextLevelFile">Path to the file where next level hashes will be written.</param>
-    /// <param name="currentLevelSize">Number of nodes in the current level.</param>
-    /// <param name="cachedLevels">Optional dictionary to store cached levels.</param>
-    /// <param name="nextLevel">The level number of the next level being built.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The number of nodes in the next level.</returns>
-    private async Task<long> BuildNextLevelFromFileAsync(
-        string currentLevelFile, 
-        string nextLevelFile, 
-        long currentLevelSize, 
-        Dictionary<int, List<byte[]>>? cachedLevels,
-        int nextLevel,
-        CancellationToken cancellationToken)
-    {
         long nextLevelSize = 0;
-        List<byte[]>? levelCache = null;
-
-        // Initialize cache list for this level if caching is enabled
-        if (cachedLevels != null)
-        {
-            levelCache = new List<byte[]>();
-        }
 
         await using (var readStream = new FileStream(currentLevelFile, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
         using (var reader = new BinaryReader(readStream))
@@ -381,20 +268,11 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
                 // Compute parent hash
                 byte[] parentHash = ComputeParentHash(leftHash, rightHash);
                 
-                // Cache the parent hash if caching is enabled
-                levelCache?.Add(parentHash);
-                
                 // Write parent hash to next level file
                 writer.Write(parentHash.Length);
                 writer.Write(parentHash);
                 nextLevelSize++;
             }
-        }
-
-        // Store the cached level if we collected any hashes
-        if (levelCache != null && levelCache.Count > 0)
-        {
-            cachedLevels![nextLevel] = levelCache;
         }
 
         return nextLevelSize;
@@ -728,27 +606,7 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
         return hash;
     }
 
-    /// <summary>
-    /// Saves cache data to a file.
-    /// </summary>
-    /// <param name="cache">The cache data to save.</param>
-    /// <param name="filePath">Path to the cache file.</param>
-    /// <exception cref="ArgumentNullException">Thrown when cache or filePath is null.</exception>
-    /// <remarks>
-    /// The cache is serialized using the CacheSerializer from the Cache namespace.
-    /// This allows the cache to be loaded later to accelerate proof generation without
-    /// re-streaming the entire dataset.
-    /// </remarks>
-    public static void SaveCache(CacheData cache, string filePath)
-    {
-        if (cache == null)
-            throw new ArgumentNullException(nameof(cache));
-        if (filePath == null)
-            throw new ArgumentNullException(nameof(filePath));
 
-        var serialized = CacheSerializer.Serialize(cache);
-        File.WriteAllBytes(filePath, serialized);
-    }
 
     /// <summary>
     /// Loads cache data from a file.

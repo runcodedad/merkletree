@@ -336,7 +336,7 @@ For streaming scenarios, advanced usage, and format specification, see:
 
 For large datasets processed with `MerkleTreeStream`, caching upper levels of the Merkle tree can significantly accelerate proof generation by avoiding recomputation of frequently accessed nodes.
 
-### Building a Streaming Tree with Cache
+### Building a Streaming Tree with Cache (Single Pass)
 
 ```csharp
 using MerkleTree.Core;
@@ -352,17 +352,14 @@ async IAsyncEnumerable<byte[]> StreamLeafData()
 
 var stream = new MerkleTreeStream(new Sha256HashFunction());
 
-// Build tree without cache first to get height
-var metadata = await stream.BuildAsync(StreamLeafData());
+// Build tree and cache top 5 levels in a single pass
+var metadata = await stream.BuildAsync(
+    StreamLeafData(), 
+    cacheFilePath: "merkle.cache", 
+    topLevelsToCache: 5);
 
-// Now build with cache for top 5 levels
-var cacheConfig = CacheConfiguration.ForTopLevels(metadata.Height, 5);
-var (cachedMetadata, cache) = await stream.BuildAsync(StreamLeafData(), cacheConfig);
-
-// Save cache to file for later use
-MerkleTreeStream.SaveCache(cache!, "merkle.cache");
-
-Console.WriteLine($"Cache built: levels {cacheConfig.StartLevel} to {cacheConfig.EndLevel}");
+Console.WriteLine($"Tree built and cache saved to merkle.cache");
+Console.WriteLine($"Root Hash: {Convert.ToHexString(metadata.RootHash)}");
 ```
 
 ### Using Cache for Proof Generation
@@ -379,11 +376,11 @@ var stream = new MerkleTreeStream(new Sha256HashFunction());
 var proof = await stream.GenerateProofAsync(
     StreamLeafData(), 
     leafIndex: 1000, 
-    leafCount: cachedMetadata.LeafCount,
+    leafCount: metadata.LeafCount,
     cache: cacheDict);
 
 // Verify proof
-bool isValid = proof.Verify(cachedMetadata.RootHash, new Sha256HashFunction());
+bool isValid = proof.Verify(metadata.RootHash, new Sha256HashFunction());
 Console.WriteLine($"Proof valid: {isValid}");
 ```
 

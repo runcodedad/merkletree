@@ -7,7 +7,7 @@ using System.Text;
 namespace MerkleTree.Tests.Cache;
 
 /// <summary>
-/// Tests for cache integration with MerkleTreeStream.
+/// Tests for file-based cache integration with MerkleTreeStream.
 /// </summary>
 public class MerkleTreeStreamCacheTests
 {
@@ -24,78 +24,35 @@ public class MerkleTreeStreamCacheTests
     }
 
     [Fact]
-    public async Task BuildAsync_WithoutCacheConfig_ReturnsNullCache()
+    public async Task BuildAsync_WithoutCachePath_DoesNotCreateCacheFile()
     {
         // Arrange
         var stream = new MerkleTreeStream();
         var leafData = CreateLeafDataAsync(8);
 
         // Act
-        var (metadata, cache) = await stream.BuildAsync(leafData, null);
+        var metadata = await stream.BuildAsync(leafData);
 
         // Assert
         Assert.NotNull(metadata);
-        Assert.Null(cache);
+        Assert.Equal(3, metadata.Height); // 8 leaves -> height 3
     }
 
     [Fact]
-    public async Task BuildAsync_WithCacheConfig_ReturnsCache()
+    public async Task BuildAsync_WithCachePath_CreatesCacheFile()
     {
         // Arrange
         var stream = new MerkleTreeStream();
-        var leafData = CreateLeafDataAsync(8);
-        var cacheConfig = new CacheConfiguration(1, 2);
-
-        // Act
-        var (metadata, cache) = await stream.BuildAsync(leafData, cacheConfig);
-
-        // Assert
-        Assert.NotNull(metadata);
-        Assert.NotNull(cache);
-        Assert.Equal(1, cache.Metadata.StartLevel);
-        Assert.Equal(2, cache.Metadata.EndLevel);
-    }
-
-    [Fact]
-    public async Task BuildAsync_WithTopLevelsConfig_BuildsCorrectCache()
-    {
-        // Arrange
-        var stream = new MerkleTreeStream();
-        var leafData1 = CreateLeafDataAsync(16);
-        
-        // First, build without cache to get tree height
-        var metadataOnly = await stream.BuildAsync(leafData1);
-        var treeHeight = metadataOnly.Height;
-        
-        // Build with cache for top 2 levels
-        var leafData2 = CreateLeafDataAsync(16);
-        var cacheConfig = CacheConfiguration.ForTopLevels(treeHeight, 2);
-
-        // Act
-        var (metadata, cache) = await stream.BuildAsync(leafData2, cacheConfig);
-
-        // Assert
-        Assert.NotNull(cache);
-        Assert.Equal(treeHeight - 2, cache.Metadata.StartLevel);
-        Assert.Equal(treeHeight - 1, cache.Metadata.EndLevel);
-    }
-
-    [Fact]
-    public async Task SaveCache_WithValidCache_WritesFile()
-    {
-        // Arrange
-        var stream = new MerkleTreeStream();
-        var leafData = CreateLeafDataAsync(8);
-        var cacheConfig = new CacheConfiguration(1, 2);
-        var (metadata, cache) = await stream.BuildAsync(leafData, cacheConfig);
+        var leafData = CreateLeafDataAsync(16);
         var tempFile = Path.GetTempFileName();
 
         try
         {
             // Act
-            MerkleTreeStream.SaveCache(cache!, tempFile);
+            var metadata = await stream.BuildAsync(leafData, cacheFilePath: tempFile, topLevelsToCache: 2);
 
             // Assert
+            Assert.NotNull(metadata);
             Assert.True(File.Exists(tempFile));
             var fileInfo = new FileInfo(tempFile);
             Assert.True(fileInfo.Length > 0);
@@ -108,16 +65,31 @@ public class MerkleTreeStreamCacheTests
     }
 
     [Fact]
-    public void SaveCache_WithNullCache_ThrowsArgumentNullException()
+    public async Task BuildAsync_WithCache_DoesNotRequireMultiplePasses()
     {
         // Arrange
+        var stream = new MerkleTreeStream();
         var tempFile = Path.GetTempFileName();
+        int dataAccessCount = 0;
+
+        async IAsyncEnumerable<byte[]> TrackedLeafData()
+        {
+            for (int i = 0; i < 16; i++)
+            {
+                dataAccessCount++;
+                await Task.Yield();
+                yield return Encoding.UTF8.GetBytes($"data{i}");
+            }
+        }
 
         try
         {
-            // Act & Assert
-            Assert.Throws<ArgumentNullException>(() => 
-                MerkleTreeStream.SaveCache(null!, tempFile));
+            // Act
+            var metadata = await stream.BuildAsync(TrackedLeafData(), cacheFilePath: tempFile, topLevelsToCache: 3);
+
+            // Assert - Data should only be accessed once (single pass)
+            Assert.Equal(16, dataAccessCount);
+            Assert.True(File.Exists(tempFile));
         }
         finally
         {
@@ -132,22 +104,18 @@ public class MerkleTreeStreamCacheTests
         // Arrange
         var stream = new MerkleTreeStream();
         var leafData = CreateLeafDataAsync(8);
-        var cacheConfig = new CacheConfiguration(1, 2);
-        var (metadata, cache) = await stream.BuildAsync(leafData, cacheConfig);
         var tempFile = Path.GetTempFileName();
 
         try
         {
-            MerkleTreeStream.SaveCache(cache!, tempFile);
+            await stream.BuildAsync(leafData, cacheFilePath: tempFile, topLevelsToCache: 2);
 
             // Act
             var loadedCache = MerkleTreeStream.LoadCache(tempFile);
 
             // Assert
             Assert.NotNull(loadedCache);
-            Assert.Equal(cache.Metadata.StartLevel, loadedCache.Metadata.StartLevel);
-            Assert.Equal(cache.Metadata.EndLevel, loadedCache.Metadata.EndLevel);
-            Assert.Equal(cache.Metadata.TreeHeight, loadedCache.Metadata.TreeHeight);
+            Assert.True(loadedCache.Levels.Count > 0);
         }
         finally
         {
@@ -162,142 +130,31 @@ public class MerkleTreeStreamCacheTests
         // Arrange
         var stream = new MerkleTreeStream();
         var leafData = CreateLeafDataAsync(8);
-        var cacheConfig = new CacheConfiguration(1, 2);
-        var (metadata, cache) = await stream.BuildAsync(leafData, cacheConfig);
-
-        // Act
-        var dictionary = MerkleTreeStream.CacheToDictionary(cache!);
-
-        // Assert
-        Assert.NotNull(dictionary);
-        Assert.True(dictionary.Count > 0);
-        
-        // Verify we can look up cached values
-        foreach (var kvp in cache!.Levels)
-        {
-            int level = kvp.Key;
-            var cachedLevel = kvp.Value;
-            
-            for (long i = 0; i < cachedLevel.NodeCount; i++)
-            {
-                Assert.True(dictionary.ContainsKey((level, i)));
-                Assert.Equal(cachedLevel.GetNode(i), dictionary[(level, i)]);
-            }
-        }
-    }
-
-    [Fact]
-    public async Task GenerateProofAsync_WithCache_UsesCache()
-    {
-        // Arrange
-        var stream = new MerkleTreeStream();
-        var leafData1 = CreateLeafDataAsync(16);
-        var cacheConfig = new CacheConfiguration(1, 3);
-        var (metadata, cache) = await stream.BuildAsync(leafData1, cacheConfig);
-        
-        var cacheDict = MerkleTreeStream.CacheToDictionary(cache!);
-        var leafData2 = CreateLeafDataAsync(16);
-
-        // Act
-        var proof = await stream.GenerateProofAsync(leafData2, 5, metadata.LeafCount, cacheDict);
-
-        // Assert
-        Assert.NotNull(proof);
-        Assert.Equal(5, proof.LeafIndex);
-        Assert.Equal(metadata.Height, proof.TreeHeight);
-    }
-
-    [Fact]
-    public async Task GenerateProofAsync_WithAndWithoutCache_ProduceSameProof()
-    {
-        // Arrange
-        var stream = new MerkleTreeStream();
-        var leafData1 = CreateLeafDataAsync(16);
-        var cacheConfig = new CacheConfiguration(1, 2);
-        var (metadata, cache) = await stream.BuildAsync(leafData1, cacheConfig);
-        
-        var cacheDict = MerkleTreeStream.CacheToDictionary(cache!);
-        
-        // Act - Generate proof with cache
-        var leafData2 = CreateLeafDataAsync(16);
-        var proofWithCache = await stream.GenerateProofAsync(
-            leafData2, 5, metadata.LeafCount, cacheDict);
-        
-        // Act - Generate proof without cache
-        var leafData3 = CreateLeafDataAsync(16);
-        var proofWithoutCache = await stream.GenerateProofAsync(
-            leafData3, 5, metadata.LeafCount, null);
-
-        // Assert - Both proofs should be identical
-        Assert.Equal(proofWithCache.LeafIndex, proofWithoutCache.LeafIndex);
-        Assert.Equal(proofWithCache.TreeHeight, proofWithoutCache.TreeHeight);
-        Assert.Equal(proofWithCache.LeafValue, proofWithoutCache.LeafValue);
-        Assert.Equal(proofWithCache.SiblingHashes.Length, proofWithoutCache.SiblingHashes.Length);
-        
-        for (int i = 0; i < proofWithCache.SiblingHashes.Length; i++)
-        {
-            Assert.Equal(proofWithCache.SiblingHashes[i], proofWithoutCache.SiblingHashes[i]);
-            Assert.Equal(proofWithCache.SiblingIsRight[i], proofWithoutCache.SiblingIsRight[i]);
-        }
-
-        // Both proofs should verify
-        var rootHash = metadata.RootHash;
-        Assert.True(proofWithCache.Verify(rootHash, new Sha256HashFunction()));
-        Assert.True(proofWithoutCache.Verify(rootHash, new Sha256HashFunction()));
-    }
-
-    [Fact]
-    public async Task BuildAsync_WithLevelZeroCache_CachesLeaves()
-    {
-        // Arrange
-        var stream = new MerkleTreeStream();
-        var leafData = CreateLeafDataAsync(8);
-        var cacheConfig = new CacheConfiguration(0, 1);
-
-        // Act
-        var (metadata, cache) = await stream.BuildAsync(leafData, cacheConfig);
-
-        // Assert
-        Assert.NotNull(cache);
-        Assert.Equal(0, cache.Metadata.StartLevel);
-        Assert.True(cache.Levels.ContainsKey(0));
-    }
-
-    [Fact]
-    public async Task SaveAndLoadCache_RoundTrip_PreservesData()
-    {
-        // Arrange
-        var stream = new MerkleTreeStream();
-        var leafData1 = CreateLeafDataAsync(16);
-        var cacheConfig = new CacheConfiguration(1, 3);
-        var (metadata, cache) = await stream.BuildAsync(leafData1, cacheConfig);
         var tempFile = Path.GetTempFileName();
 
         try
         {
-            // Act - Save and load
-            MerkleTreeStream.SaveCache(cache!, tempFile);
-            var loadedCache = MerkleTreeStream.LoadCache(tempFile);
+            await stream.BuildAsync(leafData, cacheFilePath: tempFile, topLevelsToCache: 2);
+            var cache = MerkleTreeStream.LoadCache(tempFile);
 
-            // Generate proofs using both caches
-            var originalDict = MerkleTreeStream.CacheToDictionary(cache!);
-            var loadedDict = MerkleTreeStream.CacheToDictionary(loadedCache);
-            
-            var leafData2 = CreateLeafDataAsync(16);
-            var leafData3 = CreateLeafDataAsync(16);
-            
-            var originalProof = await stream.GenerateProofAsync(
-                leafData2, 7, metadata.LeafCount, originalDict);
-            var loadedProof = await stream.GenerateProofAsync(
-                leafData3, 7, metadata.LeafCount, loadedDict);
+            // Act
+            var dictionary = MerkleTreeStream.CacheToDictionary(cache);
 
-            // Assert - Proofs should be identical
-            Assert.Equal(originalProof.LeafIndex, loadedProof.LeafIndex);
-            Assert.Equal(originalProof.TreeHeight, loadedProof.TreeHeight);
+            // Assert
+            Assert.NotNull(dictionary);
+            Assert.True(dictionary.Count > 0);
             
-            for (int i = 0; i < originalProof.SiblingHashes.Length; i++)
+            // Verify we can look up cached values
+            foreach (var kvp in cache.Levels)
             {
-                Assert.Equal(originalProof.SiblingHashes[i], loadedProof.SiblingHashes[i]);
+                int level = kvp.Key;
+                var cachedLevel = kvp.Value;
+                
+                for (long i = 0; i < cachedLevel.NodeCount; i++)
+                {
+                    Assert.True(dictionary.ContainsKey((level, i)));
+                    Assert.Equal(cachedLevel.GetNode(i), dictionary[(level, i)]);
+                }
             }
         }
         finally
@@ -308,41 +165,141 @@ public class MerkleTreeStreamCacheTests
     }
 
     [Fact]
-    public async Task BuildAsync_WithDisabledCache_ReturnsNullCache()
+    public async Task GenerateProofAsync_WithCache_UsesCache()
     {
         // Arrange
         var stream = new MerkleTreeStream();
-        var leafData = CreateLeafDataAsync(8);
-        var cacheConfig = CacheConfiguration.Disabled();
+        var leafData1 = CreateLeafDataAsync(16);
+        var tempFile = Path.GetTempFileName();
 
-        // Act
-        var (metadata, cache) = await stream.BuildAsync(leafData, cacheConfig);
+        try
+        {
+            var metadata = await stream.BuildAsync(leafData1, cacheFilePath: tempFile, topLevelsToCache: 3);
+            var cache = MerkleTreeStream.LoadCache(tempFile);
+            var cacheDict = MerkleTreeStream.CacheToDictionary(cache);
+            var leafData2 = CreateLeafDataAsync(16);
 
-        // Assert
-        Assert.NotNull(metadata);
-        Assert.Null(cache);
+            // Act
+            var proof = await stream.GenerateProofAsync(leafData2, 5, metadata.LeafCount, cacheDict);
+
+            // Assert
+            Assert.NotNull(proof);
+            Assert.Equal(5, proof.LeafIndex);
+            Assert.Equal(metadata.Height, proof.TreeHeight);
+            
+            // Verify proof
+            Assert.True(proof.Verify(metadata.RootHash, new Sha256HashFunction()));
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+                File.Delete(tempFile);
+        }
     }
 
     [Fact]
-    public async Task BuildAsync_CachesCorrectNumberOfNodes()
+    public async Task GenerateProofAsync_WithAndWithoutCache_ProduceSameProof()
+    {
+        // Arrange
+        var stream = new MerkleTreeStream();
+        var leafData1 = CreateLeafDataAsync(16);
+        var tempFile = Path.GetTempFileName();
+
+        try
+        {
+            var metadata = await stream.BuildAsync(leafData1, cacheFilePath: tempFile, topLevelsToCache: 2);
+            var cache = MerkleTreeStream.LoadCache(tempFile);
+            var cacheDict = MerkleTreeStream.CacheToDictionary(cache);
+            
+            // Act - Generate proof with cache
+            var leafData2 = CreateLeafDataAsync(16);
+            var proofWithCache = await stream.GenerateProofAsync(leafData2, 5, metadata.LeafCount, cacheDict);
+            
+            // Act - Generate proof without cache
+            var leafData3 = CreateLeafDataAsync(16);
+            var proofWithoutCache = await stream.GenerateProofAsync(leafData3, 5, metadata.LeafCount, null);
+
+            // Assert - Both proofs should be identical
+            Assert.Equal(proofWithCache.LeafIndex, proofWithoutCache.LeafIndex);
+            Assert.Equal(proofWithCache.TreeHeight, proofWithoutCache.TreeHeight);
+            Assert.Equal(proofWithCache.LeafValue, proofWithoutCache.LeafValue);
+            Assert.Equal(proofWithCache.SiblingHashes.Length, proofWithoutCache.SiblingHashes.Length);
+            
+            for (int i = 0; i < proofWithCache.SiblingHashes.Length; i++)
+            {
+                Assert.Equal(proofWithCache.SiblingHashes[i], proofWithoutCache.SiblingHashes[i]);
+                Assert.Equal(proofWithCache.SiblingIsRight[i], proofWithoutCache.SiblingIsRight[i]);
+            }
+
+            // Both proofs should verify
+            var rootHash = metadata.RootHash;
+            Assert.True(proofWithCache.Verify(rootHash, new Sha256HashFunction()));
+            Assert.True(proofWithoutCache.Verify(rootHash, new Sha256HashFunction()));
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+                File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task BuildAsync_CachesCorrectNumberOfLevels()
     {
         // Arrange
         var stream = new MerkleTreeStream();
         var leafData = CreateLeafDataAsync(16); // 16 leaves -> height 4
-        var cacheConfig = new CacheConfiguration(2, 3); // Cache levels 2 and 3
+        var tempFile = Path.GetTempFileName();
 
-        // Act
-        var (metadata, cache) = await stream.BuildAsync(leafData, cacheConfig);
+        try
+        {
+            // Act - Cache top 2 levels
+            var metadata = await stream.BuildAsync(leafData, cacheFilePath: tempFile, topLevelsToCache: 2);
+            var cache = MerkleTreeStream.LoadCache(tempFile);
 
-        // Assert
-        Assert.NotNull(cache);
+            // Assert
+            Assert.NotNull(cache);
+            Assert.Equal(4, cache.Metadata.TreeHeight);
+            
+            // Should cache levels 2 and 3 (top 2 levels, excluding root at level 4)
+            Assert.Equal(2, cache.Metadata.StartLevel);
+            Assert.Equal(3, cache.Metadata.EndLevel);
+            
+            // Verify the levels exist
+            Assert.True(cache.Levels.ContainsKey(2));
+            Assert.True(cache.Levels.ContainsKey(3));
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+                File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task BuildAsync_WithZeroTopLevels_DoesNotCreateCache()
+    {
+        // Arrange
+        var stream = new MerkleTreeStream();
+        var leafData = CreateLeafDataAsync(8);
+        var tempFile = Path.GetTempFileName();
         
-        // Level 2 should have 4 nodes (16 / 2^2)
-        Assert.True(cache.Levels.ContainsKey(2));
-        Assert.Equal(4, cache.GetLevel(2).NodeCount);
-        
-        // Level 3 should have 2 nodes (16 / 2^3)
-        Assert.True(cache.Levels.ContainsKey(3));
-        Assert.Equal(2, cache.GetLevel(3).NodeCount);
+        // Delete the file so we can check if it gets created
+        File.Delete(tempFile);
+
+        try
+        {
+            // Act
+            var metadata = await stream.BuildAsync(leafData, cacheFilePath: tempFile, topLevelsToCache: 0);
+
+            // Assert
+            Assert.NotNull(metadata);
+            Assert.False(File.Exists(tempFile)); // Cache file should not be created
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+                File.Delete(tempFile);
+        }
     }
 }
