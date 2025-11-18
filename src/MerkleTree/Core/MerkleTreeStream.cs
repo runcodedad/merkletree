@@ -1,5 +1,6 @@
 using MerkleTree.Hashing;
 using MerkleTree.Proofs;
+using MerkleTree.Cache;
 
 namespace MerkleTree.Core;
 
@@ -139,6 +140,173 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
     }
 
     /// <summary>
+    /// Builds a Merkle tree from a stream of leaf data asynchronously with optional caching.
+    /// </summary>
+    /// <param name="leafData">An async enumerable of leaf data.</param>
+    /// <param name="cacheConfig">Optional cache configuration. If provided, the specified levels are cached in memory.</param>
+    /// <param name="cancellationToken">A cancellation token to cancel the operation.</param>
+    /// <returns>A task that returns a tuple containing the Merkle tree metadata and optional cache data.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="leafData"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when no leaves are provided.</exception>
+    /// <remarks>
+    /// <para>
+    /// This method builds a Merkle tree while optionally caching selected levels in memory.
+    /// Caching is particularly useful when generating multiple proofs from the same large dataset,
+    /// as cached levels don't need to be recomputed.
+    /// </para>
+    /// <para>
+    /// The cache is built incrementally during tree construction by storing the hashes of nodes
+    /// at the configured levels. This avoids the need to keep temporary files or re-stream the data
+    /// when generating proofs later.
+    /// </para>
+    /// </remarks>
+    public async Task<(MerkleTreeMetadata metadata, CacheData? cache)> BuildAsync(
+        IAsyncEnumerable<byte[]> leafData,
+        CacheConfiguration? cacheConfig,
+        CancellationToken cancellationToken = default)
+    {
+        if (leafData == null)
+            throw new ArgumentNullException(nameof(leafData));
+
+        // Create temporary directory for level files
+        string tempDir = Path.Combine(Path.GetTempPath(), $"merkletree_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        // Dictionary to store cached levels
+        Dictionary<int, List<byte[]>>? cachedLevels = null;
+        if (cacheConfig?.IsEnabled == true)
+        {
+            cachedLevels = new Dictionary<int, List<byte[]>>();
+        }
+
+        try
+        {
+            // Build Level 0 by streaming and hashing leaves to a temp file
+            string level0File = Path.Combine(tempDir, "level_0.dat");
+            long leafCount = 0;
+            List<byte[]>? level0Cache = null;
+
+            if (cachedLevels != null && cacheConfig!.StartLevel == 0)
+            {
+                level0Cache = new List<byte[]>();
+            }
+
+            await using (var fileStream = new FileStream(level0File, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+            await using (var writer = new BinaryWriter(fileStream))
+            {
+                await foreach (var leaf in leafData.WithCancellation(cancellationToken))
+                {
+                    var hash = ComputeHash(leaf);
+                    writer.Write(hash.Length);
+                    writer.Write(hash);
+                    leafCount++;
+
+                    // Cache level 0 if requested
+                    level0Cache?.Add(hash);
+                }
+            }
+
+            if (level0Cache != null)
+            {
+                cachedLevels![0] = level0Cache;
+            }
+
+            if (leafCount == 0)
+                throw new InvalidOperationException("At least one leaf is required to build a Merkle tree.");
+
+            // Build tree bottom-up level by level using temp files
+            int height = 0;
+            long currentLevelSize = leafCount;
+            string currentLevelFile = level0File;
+
+            while (currentLevelSize > 1)
+            {
+                string nextLevelFile = Path.Combine(tempDir, $"level_{height + 1}.dat");
+                
+                // Check if we should cache this level
+                bool shouldCacheNextLevel = cachedLevels != null && 
+                    cacheConfig!.StartLevel <= (height + 1) && 
+                    (height + 1) <= cacheConfig.EndLevel;
+
+                long nextLevelSize = await BuildNextLevelFromFileAsync(
+                    currentLevelFile, 
+                    nextLevelFile, 
+                    currentLevelSize, 
+                    shouldCacheNextLevel ? cachedLevels : null,
+                    height + 1,
+                    cancellationToken);
+                
+                // Clean up previous level file (except level 0 which we might need for proofs)
+                if (height > 0)
+                {
+                    File.Delete(currentLevelFile);
+                }
+                
+                currentLevelFile = nextLevelFile;
+                currentLevelSize = nextLevelSize;
+                height++;
+            }
+
+            // Read the root hash
+            byte[] rootHash;
+            using (var fileStream = new FileStream(currentLevelFile, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var reader = new BinaryReader(fileStream))
+            {
+                int hashLength = reader.ReadInt32();
+                rootHash = reader.ReadBytes(hashLength);
+            }
+
+            var rootNode = new MerkleTreeNode(rootHash);
+            var metadata = new MerkleTreeMetadata(rootNode, height, leafCount);
+
+            // Build CacheData if we cached any levels
+            CacheData? cache = null;
+            if (cachedLevels != null && cachedLevels.Count > 0)
+            {
+                cache = BuildCacheData(cachedLevels, cacheConfig!, height);
+            }
+
+            return (metadata, cache);
+        }
+        finally
+        {
+            // Clean up all temporary files
+            try
+            {
+                if (Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, recursive: true);
+                }
+            }
+            catch
+            {
+                // Best effort cleanup - ignore errors
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds cache data from collected level information.
+    /// </summary>
+    private CacheData BuildCacheData(Dictionary<int, List<byte[]>> cachedLevels, CacheConfiguration cacheConfig, int treeHeight)
+    {
+        var metadata = new CacheMetadata(
+            treeHeight,
+            _hashFunction.Name,
+            _hashFunction.HashSizeInBytes,
+            cacheConfig.StartLevel,
+            cacheConfig.EndLevel);
+
+        var levels = new Dictionary<int, CachedLevel>();
+        foreach (var kvp in cachedLevels)
+        {
+            levels[kvp.Key] = new CachedLevel(kvp.Key, kvp.Value.ToArray());
+        }
+
+        return new CacheData(metadata, levels);
+    }
+
+    /// <summary>
     /// Builds the next level of the tree by reading from a file and writing to another file asynchronously.
     /// </summary>
     /// <param name="currentLevelFile">Path to the file containing current level hashes.</param>
@@ -148,7 +316,35 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
     /// <returns>The number of nodes in the next level.</returns>
     private async Task<long> BuildNextLevelFromFileAsync(string currentLevelFile, string nextLevelFile, long currentLevelSize, CancellationToken cancellationToken)
     {
+        return await BuildNextLevelFromFileAsync(currentLevelFile, nextLevelFile, currentLevelSize, null, 0, cancellationToken);
+    }
+
+    /// <summary>
+    /// Builds the next level of the tree by reading from a file and writing to another file asynchronously with optional caching.
+    /// </summary>
+    /// <param name="currentLevelFile">Path to the file containing current level hashes.</param>
+    /// <param name="nextLevelFile">Path to the file where next level hashes will be written.</param>
+    /// <param name="currentLevelSize">Number of nodes in the current level.</param>
+    /// <param name="cachedLevels">Optional dictionary to store cached levels.</param>
+    /// <param name="nextLevel">The level number of the next level being built.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The number of nodes in the next level.</returns>
+    private async Task<long> BuildNextLevelFromFileAsync(
+        string currentLevelFile, 
+        string nextLevelFile, 
+        long currentLevelSize, 
+        Dictionary<int, List<byte[]>>? cachedLevels,
+        int nextLevel,
+        CancellationToken cancellationToken)
+    {
         long nextLevelSize = 0;
+        List<byte[]>? levelCache = null;
+
+        // Initialize cache list for this level if caching is enabled
+        if (cachedLevels != null)
+        {
+            levelCache = new List<byte[]>();
+        }
 
         await using (var readStream = new FileStream(currentLevelFile, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
         using (var reader = new BinaryReader(readStream))
@@ -185,11 +381,20 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
                 // Compute parent hash
                 byte[] parentHash = ComputeParentHash(leftHash, rightHash);
                 
+                // Cache the parent hash if caching is enabled
+                levelCache?.Add(parentHash);
+                
                 // Write parent hash to next level file
                 writer.Write(parentHash.Length);
                 writer.Write(parentHash);
                 nextLevelSize++;
             }
+        }
+
+        // Store the cached level if we collected any hashes
+        if (levelCache != null && levelCache.Count > 0)
+        {
+            cachedLevels![nextLevel] = levelCache;
         }
 
         return nextLevelSize;
@@ -521,6 +726,79 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
         }
         
         return hash;
+    }
+
+    /// <summary>
+    /// Saves cache data to a file.
+    /// </summary>
+    /// <param name="cache">The cache data to save.</param>
+    /// <param name="filePath">Path to the cache file.</param>
+    /// <exception cref="ArgumentNullException">Thrown when cache or filePath is null.</exception>
+    /// <remarks>
+    /// The cache is serialized using the CacheSerializer from the Cache namespace.
+    /// This allows the cache to be loaded later to accelerate proof generation without
+    /// re-streaming the entire dataset.
+    /// </remarks>
+    public static void SaveCache(CacheData cache, string filePath)
+    {
+        if (cache == null)
+            throw new ArgumentNullException(nameof(cache));
+        if (filePath == null)
+            throw new ArgumentNullException(nameof(filePath));
+
+        var serialized = CacheSerializer.Serialize(cache);
+        File.WriteAllBytes(filePath, serialized);
+    }
+
+    /// <summary>
+    /// Loads cache data from a file.
+    /// </summary>
+    /// <param name="filePath">Path to the cache file.</param>
+    /// <returns>The loaded cache data.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null.</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the cache file doesn't exist.</exception>
+    /// <remarks>
+    /// The loaded cache can be passed to GenerateProofAsync to accelerate proof generation
+    /// by avoiding recomputation of cached nodes.
+    /// </remarks>
+    public static CacheData LoadCache(string filePath)
+    {
+        if (filePath == null)
+            throw new ArgumentNullException(nameof(filePath));
+
+        var cacheBytes = File.ReadAllBytes(filePath);
+        return CacheSerializer.Deserialize(cacheBytes);
+    }
+
+    /// <summary>
+    /// Converts CacheData to a dictionary format suitable for GenerateProofAsync.
+    /// </summary>
+    /// <param name="cache">The cache data to convert.</param>
+    /// <returns>A dictionary mapping (level, index) to hash values.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when cache is null.</exception>
+    /// <remarks>
+    /// This helper method converts the structured CacheData format into the dictionary format
+    /// expected by the GenerateProofAsync method's cache parameter.
+    /// </remarks>
+    public static Dictionary<(int level, long index), byte[]> CacheToDictionary(CacheData cache)
+    {
+        if (cache == null)
+            throw new ArgumentNullException(nameof(cache));
+
+        var dictionary = new Dictionary<(int level, long index), byte[]>();
+
+        foreach (var kvp in cache.Levels)
+        {
+            int level = kvp.Key;
+            var cachedLevel = kvp.Value;
+
+            for (long i = 0; i < cachedLevel.NodeCount; i++)
+            {
+                dictionary[(level, i)] = cachedLevel.GetNode(i);
+            }
+        }
+
+        return dictionary;
     }
 
 }

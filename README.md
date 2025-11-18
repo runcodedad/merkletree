@@ -21,11 +21,11 @@ This library provides a robust, well-tested implementation of Merkle trees for .
 - **Streaming support**: Build trees from large datasets without loading everything into memory
 - **Async/await support**: Process data asynchronously with `IAsyncEnumerable<byte[]>`
 - **Batch processing**: Control memory usage with configurable batch sizes
-- **Merkle tree caching**: Optional caching of tree levels to accelerate proof generation on large datasets
-- **Cache statistics**: Track cache hits, misses, and effectiveness
+- **Merkle tree caching**: Optional caching of tree levels for `MerkleTreeStream` to accelerate proof generation on large datasets
+- **Cache persistence**: Save and load cache to/from files for reuse across sessions
 - **Type-safe**: Full C# type safety with nullable reference types enabled
 - **XML documentation**: IntelliSense support for better developer experience
-- **Well-tested**: Comprehensive test coverage (172+ tests)
+- **Well-tested**: Comprehensive test coverage (167+ tests)
 - **Open source**: MIT licensed
 
 ## Installation
@@ -332,49 +332,59 @@ For streaming scenarios, advanced usage, and format specification, see:
 - [Proof Generation Documentation](docs/PROOF_GENERATION.md)
 - [Proof Serialization Format](docs/PROOF_SERIALIZATION.md)
 
-## Merkle Tree Caching
+## Merkle Tree Caching for Streaming
 
-For large datasets, caching upper levels of the Merkle tree can significantly accelerate proof generation by avoiding recomputation of frequently accessed nodes.
+For large datasets processed with `MerkleTreeStream`, caching upper levels of the Merkle tree can significantly accelerate proof generation by avoiding recomputation of frequently accessed nodes.
 
-### Building a Tree with Cache
+### Building a Streaming Tree with Cache
 
 ```csharp
 using MerkleTree.Core;
 using MerkleTree.Cache;
 using MerkleTree.Hashing;
 
-var leafData = CreateLargeDataset(); // IEnumerable<byte[]>
+// Stream large dataset (e.g., from file, database, or network)
+async IAsyncEnumerable<byte[]> StreamLeafData()
+{
+    // Your streaming logic here
+    // This could read from a 500GB+ file without loading it all into memory
+}
 
-// Cache the top 5 levels of the tree
-var metadata = new MerkleTree(leafData).GetMetadata();
+var stream = new MerkleTreeStream(new Sha256HashFunction());
+
+// Build tree without cache first to get height
+var metadata = await stream.BuildAsync(StreamLeafData());
+
+// Now build with cache for top 5 levels
 var cacheConfig = CacheConfiguration.ForTopLevels(metadata.Height, 5);
-
-// Build tree with cache enabled
-var tree = new MerkleTree(leafData, new Sha256HashFunction(), cacheConfig);
+var (cachedMetadata, cache) = await stream.BuildAsync(StreamLeafData(), cacheConfig);
 
 // Save cache to file for later use
-tree.SaveCache("merkle.cache");
+MerkleTreeStream.SaveCache(cache!, "merkle.cache");
 
 Console.WriteLine($"Cache built: levels {cacheConfig.StartLevel} to {cacheConfig.EndLevel}");
 ```
 
-### Loading a Cached Tree
+### Using Cache for Proof Generation
 
 ```csharp
-// Load tree with pre-built cache
-var leafData = LoadDataset();
-var tree = MerkleTree.LoadWithCache(
-    leafData, 
-    new Sha256HashFunction(), 
-    "merkle.cache");
+// Load cache from file
+var cache = MerkleTreeStream.LoadCache("merkle.cache");
 
-// Generate proofs using cached data
-var proof = tree.GenerateProof(leafIndex: 1000);
+// Convert cache to dictionary format for proof generation
+var cacheDict = MerkleTreeStream.CacheToDictionary(cache);
 
-// Check cache performance
-var stats = tree.CacheStatistics;
-Console.WriteLine($"Cache hit rate: {stats.HitRate:F2}%");
-Console.WriteLine($"Hits: {stats.Hits}, Misses: {stats.Misses}");
+// Generate proof with cache - avoids recomputing cached nodes
+var stream = new MerkleTreeStream(new Sha256HashFunction());
+var proof = await stream.GenerateProofAsync(
+    StreamLeafData(), 
+    leafIndex: 1000, 
+    leafCount: cachedMetadata.LeafCount,
+    cache: cacheDict);
+
+// Verify proof
+bool isValid = proof.Verify(cachedMetadata.RootHash, new Sha256HashFunction());
+Console.WriteLine($"Proof valid: {isValid}");
 ```
 
 ### Cache Configuration Options
@@ -391,45 +401,24 @@ var config2 = CacheConfiguration.ForTopLevels(treeHeight: 10, topLevels: 5);
 var config3 = CacheConfiguration.Disabled();
 ```
 
-### Cache Statistics
+### Cache Benefits for Streaming
 
-Track cache effectiveness during proof generation:
-
-```csharp
-var tree = new MerkleTree(leafData, new Sha256HashFunction(), cacheConfig);
-
-// Generate multiple proofs
-for (int i = 0; i < 1000; i++)
-{
-    tree.GenerateProof(i);
-}
-
-// View accumulated statistics
-var stats = tree.CacheStatistics;
-Console.WriteLine(stats.ToString());
-// Output: "Cache Stats: 3000 hits, 1000 misses, 75.00% hit rate (4000 total lookups)"
-
-// Reset statistics for next batch
-stats.Reset();
-```
-
-### Cache Benefits
-
-- **Faster proof generation**: Cached nodes don't need recomputation
-- **Reduced I/O**: Fewer accesses to underlying data
+- **Faster proof generation**: Cached nodes don't need recomputation from streamed data
+- **Reduced I/O**: Avoids re-streaming the entire dataset for each proof
 - **Configurable**: Choose which levels to cache based on your needs
-- **Transparent**: Works seamlessly with existing code
-- **Statistics**: Monitor cache effectiveness with built-in metrics
+- **Persistent**: Save cache to file and reuse across sessions
+- **Memory efficient**: Only caches selected levels, not the entire tree
 
-### When to Use Caching
+### When to Use Caching with MerkleTreeStream
 
 Caching is most beneficial when:
-- Generating many proofs from the same tree
-- Working with large datasets where recomputation is expensive
+- Generating many proofs from the same large dataset
+- Working with datasets that exceed available RAM (100GB+)
+- Re-streaming the data is expensive (e.g., from network or slow storage)
 - Upper tree levels are frequently accessed
 - Storage space is available for cache files
 
-For trees with only a few leaves or when generating a single proof, the overhead of caching may exceed the benefits.
+For small datasets that fit in memory, consider using the in-memory `MerkleTree` class instead.
 
 ## Requirements
 
@@ -517,15 +506,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   - Complete round-trip preservation without information loss
   - Extensive validation during deserialization
   - Documented format specification for cross-platform implementation
-- **Merkle tree caching** (NEW)
-  - Optional caching of tree levels to accelerate proof generation
+- **Merkle tree caching for streaming** (NEW)
+  - Optional caching of tree levels for `MerkleTreeStream` to accelerate proof generation
   - Configurable cache levels (top N levels or specific range)
   - Save/load cache to/from file using compact binary format
-  - Automatic cache lookup during proof generation with fallback to recomputation
-  - Cache statistics tracking (hits, misses, hit rate)
-  - Thread-safe cache operations
-  - Full integration with existing MerkleTree API
-- Comprehensive test coverage (172+ tests)
+  - Cache built during tree construction without additional passes
+  - Cache lookup during proof generation avoids re-streaming data
+  - Persistent cache files for reuse across sessions
+  - Full integration with `MerkleTreeStream` API
+- Comprehensive test coverage (167+ tests)
 
 ## Support
 
