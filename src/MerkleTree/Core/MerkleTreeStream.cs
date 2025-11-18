@@ -107,20 +107,34 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
             long currentLevelSize = leafCount;
             string currentLevelFile = level0File;
 
-            // Track all level files for potential cleanup
-            var allLevelFiles = new List<string> { level0File };
-
             while (currentLevelSize > 1)
             {
                 string nextLevelFile = Path.Combine(tempDir, $"level_{height + 1}.dat");
                 long nextLevelSize = await BuildNextLevelFromFileAsync(currentLevelFile, nextLevelFile, currentLevelSize, cancellationToken);
                 
-                allLevelFiles.Add(nextLevelFile);
-                
-                // Track this level for caching if needed (we'll determine which levels after we know the height)
+                // Track this level for caching if needed
                 if (enableCaching)
                 {
                     levelsToCache.Add((height + 1, nextLevelFile, nextLevelSize));
+                }
+                else
+                {
+                    // If not caching, delete the previous level file immediately to save storage
+                    if (height > 0)
+                    {
+                        try
+                        {
+                            var prevLevelFile = Path.Combine(tempDir, $"level_{height}.dat");
+                            if (File.Exists(prevLevelFile))
+                            {
+                                File.Delete(prevLevelFile);
+                            }
+                        }
+                        catch
+                        {
+                            // Best effort cleanup
+                        }
+                    }
                 }
                 
                 currentLevelFile = nextLevelFile;
@@ -143,11 +157,43 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
             // Build cache file if caching is enabled
             if (enableCaching && levelsToCache.Count > 0)
             {
-                // Determine which levels to cache (top N levels, but not the root)
-                int startLevel = Math.Max(0, height - topLevelsToCache);
-                int endLevel = height - 1; // Don't cache the root itself
+                // Filter out the root level (it's always available and shouldn't be cached)
+                var levelsToActuallyCache = levelsToCache.Where(l => l.level < height).ToList();
+                
+                if (levelsToActuallyCache.Count > 0)
+                {
+                    // Determine which levels to keep: the top N levels (closest to root, excluding root itself)
+                    // For efficiency, keep only topLevelsToCache levels and delete the rest
+                    int levelsToKeep = Math.Min(topLevelsToCache, levelsToActuallyCache.Count);
+                    int startIndex = levelsToActuallyCache.Count - levelsToKeep;
+                    
+                    // Delete level files we won't cache to save storage
+                    for (int i = 0; i < startIndex; i++)
+                    {
+                        try
+                        {
+                            if (File.Exists(levelsToActuallyCache[i].filePath))
+                            {
+                                File.Delete(levelsToActuallyCache[i].filePath);
+                            }
+                        }
+                        catch
+                        {
+                            // Best effort cleanup
+                        }
+                    }
+                    
+                    // Keep only the top levels
+                    var finalLevelsToCache = levelsToActuallyCache.Skip(startIndex).ToList();
+                    
+                    if (finalLevelsToCache.Count > 0)
+                    {
+                        int startLevel = finalLevelsToCache[0].level;
+                        int endLevel = finalLevelsToCache[finalLevelsToCache.Count - 1].level;
 
-                await BuildCacheFileAsync(levelsToCache, startLevel, endLevel, height, cacheFilePath!, cancellationToken);
+                        await BuildCacheFileAsync(finalLevelsToCache, startLevel, endLevel, height, cacheFilePath!, cancellationToken);
+                    }
+                }
             }
 
             return metadata;
