@@ -1,5 +1,6 @@
 using MerkleTree.Hashing;
 using MerkleTree.Proofs;
+using MerkleTree.Cache;
 
 namespace MerkleTree.Core;
 
@@ -63,6 +64,16 @@ public class MerkleTree : MerkleTreeBase
     private List<byte[]> LeafData { get; }
 
     /// <summary>
+    /// Gets the cache data for this tree, if caching was enabled during construction.
+    /// </summary>
+    private CacheData? Cache { get; }
+
+    /// <summary>
+    /// Gets the cache statistics for this tree.
+    /// </summary>
+    public CacheStatistics CacheStatistics { get; } = new CacheStatistics();
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="MerkleTree"/> class with the specified leaf data using SHA-256.
     /// </summary>
     /// <param name="leafData">The data for each leaf node. Must contain at least one element.</param>
@@ -81,6 +92,19 @@ public class MerkleTree : MerkleTreeBase
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="leafData"/> or <paramref name="hashFunction"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="leafData"/> is empty.</exception>
     public MerkleTree(IEnumerable<byte[]> leafData, IHashFunction hashFunction)
+        : this(leafData, hashFunction, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="MerkleTree"/> class with the specified leaf data, hash function, and cache configuration.
+    /// </summary>
+    /// <param name="leafData">The data for each leaf node. Must contain at least one element.</param>
+    /// <param name="hashFunction">The hash function to use.</param>
+    /// <param name="cacheConfig">Optional cache configuration. If null, no cache is built.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="leafData"/> or <paramref name="hashFunction"/> is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="leafData"/> is empty.</exception>
+    public MerkleTree(IEnumerable<byte[]> leafData, IHashFunction hashFunction, CacheConfiguration? cacheConfig)
         : base(hashFunction)
     {
         if (leafData == null)
@@ -92,10 +116,11 @@ public class MerkleTree : MerkleTreeBase
 
         LeafCount = leafList.Count;
         LeafData = leafList;
-        var (root, height, leafNodes) = BuildTree(leafList);
+        var (root, height, leafNodes, cache) = BuildTree(leafList, cacheConfig);
         Root = root;
         Height = height;
         LeafNodes = leafNodes;
+        Cache = cache;
     }
 
 
@@ -103,23 +128,50 @@ public class MerkleTree : MerkleTreeBase
     /// Builds the Merkle tree from the provided leaf data.
     /// </summary>
     /// <param name="leafData">The data for each leaf node.</param>
-    /// <returns>A tuple containing the root node, the height of the tree, and the list of leaf nodes.</returns>
-    private (MerkleTreeNode root, int height, List<MerkleTreeNode> leafNodes) BuildTree(List<byte[]> leafData)
+    /// <param name="cacheConfig">Optional cache configuration.</param>
+    /// <returns>A tuple containing the root node, the height of the tree, the list of leaf nodes, and optional cache data.</returns>
+    private (MerkleTreeNode root, int height, List<MerkleTreeNode> leafNodes, CacheData? cache) BuildTree(List<byte[]> leafData, CacheConfiguration? cacheConfig)
     {
         // Create leaf nodes at Level 0
         var currentLevel = leafData.Select(data => new MerkleTreeNode(ComputeHash(data))).ToList();
         var leafNodes = new List<MerkleTreeNode>(currentLevel);
 
         int height = 0;
+        Dictionary<int, List<MerkleTreeNode>>? levelCache = null;
+
+        // Initialize cache collection if caching is enabled
+        if (cacheConfig?.IsEnabled == true)
+        {
+            levelCache = new Dictionary<int, List<MerkleTreeNode>>();
+            
+            // Cache level 0 (leaves) if requested
+            if (cacheConfig.StartLevel == 0)
+            {
+                levelCache[0] = new List<MerkleTreeNode>(currentLevel);
+            }
+        }
 
         // Build tree bottom-up until we reach the root
         while (currentLevel.Count > 1)
         {
             currentLevel = BuildNextLevel(currentLevel);
             height++;
+
+            // Cache this level if it's within the configured range
+            if (levelCache != null && cacheConfig!.StartLevel <= height && height <= cacheConfig.EndLevel)
+            {
+                levelCache[height] = new List<MerkleTreeNode>(currentLevel);
+            }
         }
 
-        return (currentLevel[0], height, leafNodes);
+        // Build cache data if caching was enabled
+        CacheData? cache = null;
+        if (levelCache != null && cacheConfig != null && levelCache.Count > 0)
+        {
+            cache = BuildCacheData(levelCache, cacheConfig, height);
+        }
+
+        return (currentLevel[0], height, leafNodes, cache);
     }
 
     /// <summary>
@@ -249,18 +301,65 @@ public class MerkleTree : MerkleTreeBase
                 siblingOnRight = false;
             }
 
-            // Get the sibling hash
-            byte[] siblingHash;
-            if (siblingIndex < currentLevelNodes.Count)
+            // Try to get sibling hash from cache first
+            byte[]? siblingHash = null;
+            bool foundInCache = false;
+
+            if (Cache != null && Cache.Levels.ContainsKey(level))
             {
-                // Sibling exists in the tree
-                siblingHash = currentLevelNodes[(int)siblingIndex].Hash!;
+                // Try to get from cache
+                try
+                {
+                    var cachedLevel = Cache.GetLevel(level);
+                    if (siblingIndex < cachedLevel.NodeCount)
+                    {
+                        siblingHash = cachedLevel.GetNode(siblingIndex);
+                        foundInCache = true;
+                        CacheStatistics.RecordHit();
+                    }
+                    else
+                    {
+                        // Sibling doesn't exist in level - compute padding hash
+                        var currentHash = currentIndex < cachedLevel.NodeCount 
+                            ? cachedLevel.GetNode(currentIndex)
+                            : currentLevelNodes[(int)currentIndex].Hash!;
+                        siblingHash = CreatePaddingHash(currentHash);
+                        foundInCache = true;
+                        CacheStatistics.RecordHit();
+                    }
+                }
+                catch (KeyNotFoundException)
+                {
+                    // Cache miss - will compute below
+                    foundInCache = false;
+                    CacheStatistics.RecordMiss();
+                }
             }
-            else
+            else if (Cache != null)
             {
-                // No sibling exists - this means we have an odd number of nodes
-                // The sibling is a padding hash
-                siblingHash = CreatePaddingHash(currentLevelNodes[(int)currentIndex].Hash!);
+                // Cache exists but doesn't have this level
+                CacheStatistics.RecordMiss();
+            }
+
+            // Fallback to recomputation if not found in cache
+            if (!foundInCache)
+            {
+                if (siblingIndex < currentLevelNodes.Count)
+                {
+                    // Sibling exists in the tree
+                    siblingHash = currentLevelNodes[(int)siblingIndex].Hash!;
+                }
+                else
+                {
+                    // No sibling exists - this means we have an odd number of nodes
+                    // The sibling is a padding hash
+                    siblingHash = CreatePaddingHash(currentLevelNodes[(int)currentIndex].Hash!);
+                }
+            }
+
+            if (siblingHash == null)
+            {
+                throw new InvalidOperationException($"Failed to compute sibling hash at level {level}");
             }
 
             siblingHashes.Add(siblingHash);
@@ -282,5 +381,141 @@ public class MerkleTree : MerkleTreeBase
             Height,
             siblingHashes.ToArray(),
             siblingIsRight.ToArray());
+    }
+
+    /// <summary>
+    /// Builds cache data from collected level information.
+    /// </summary>
+    /// <param name="levelCache">Dictionary mapping level numbers to node lists.</param>
+    /// <param name="cacheConfig">Cache configuration.</param>
+    /// <param name="treeHeight">Height of the tree.</param>
+    /// <returns>Cache data containing the specified levels.</returns>
+    private CacheData BuildCacheData(Dictionary<int, List<MerkleTreeNode>> levelCache, CacheConfiguration cacheConfig, int treeHeight)
+    {
+        // Create metadata
+        var metadata = new CacheMetadata(
+            treeHeight,
+            _hashFunction.Name,
+            _hashFunction.HashSizeInBytes,
+            cacheConfig.StartLevel,
+            cacheConfig.EndLevel);
+
+        // Build level dictionary
+        var levels = new Dictionary<int, CachedLevel>();
+        for (int level = cacheConfig.StartLevel; level <= cacheConfig.EndLevel; level++)
+        {
+            if (levelCache.TryGetValue(level, out var nodes))
+            {
+                var hashArray = nodes.Select(n => n.Hash!).ToArray();
+                levels[level] = new CachedLevel(level, hashArray);
+            }
+        }
+
+        return new CacheData(metadata, levels);
+    }
+
+    /// <summary>
+    /// Saves the cache to a file.
+    /// </summary>
+    /// <param name="filePath">Path to the cache file.</param>
+    /// <exception cref="InvalidOperationException">Thrown when no cache is available to save.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null.</exception>
+    public void SaveCache(string filePath)
+    {
+        if (filePath == null)
+            throw new ArgumentNullException(nameof(filePath));
+        if (Cache == null)
+            throw new InvalidOperationException("No cache is available. The tree must be built with a cache configuration to save a cache.");
+
+        var serialized = CacheSerializer.Serialize(Cache);
+        File.WriteAllBytes(filePath, serialized);
+    }
+
+    /// <summary>
+    /// Loads a cache from a file and returns a new MerkleTree instance that uses it.
+    /// </summary>
+    /// <param name="leafData">The data for each leaf node. Must contain at least one element.</param>
+    /// <param name="hashFunction">The hash function to use.</param>
+    /// <param name="cachePath">Path to the cache file to load.</param>
+    /// <returns>A new MerkleTree instance with the loaded cache.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when leafData is empty or cache is incompatible.</exception>
+    public static MerkleTree LoadWithCache(IEnumerable<byte[]> leafData, IHashFunction hashFunction, string cachePath)
+    {
+        if (leafData == null)
+            throw new ArgumentNullException(nameof(leafData));
+        if (hashFunction == null)
+            throw new ArgumentNullException(nameof(hashFunction));
+        if (cachePath == null)
+            throw new ArgumentNullException(nameof(cachePath));
+
+        var leafList = leafData.ToList();
+        if (leafList.Count == 0)
+            throw new ArgumentException("Leaf data must contain at least one element.", nameof(leafData));
+
+        // Load cache from file
+        var cacheBytes = File.ReadAllBytes(cachePath);
+        var cache = CacheSerializer.Deserialize(cacheBytes);
+
+        // Validate cache compatibility
+        if (cache.Metadata.HashFunctionName != hashFunction.Name)
+        {
+            throw new ArgumentException(
+                $"Cache hash function '{cache.Metadata.HashFunctionName}' does not match tree hash function '{hashFunction.Name}'.",
+                nameof(cachePath));
+        }
+
+        if (cache.Metadata.HashSizeInBytes != hashFunction.HashSizeInBytes)
+        {
+            throw new ArgumentException(
+                $"Cache hash size {cache.Metadata.HashSizeInBytes} does not match tree hash size {hashFunction.HashSizeInBytes}.",
+                nameof(cachePath));
+        }
+
+        // Build tree with loaded cache
+        return new MerkleTree(leafList, hashFunction, cache);
+    }
+
+    /// <summary>
+    /// Internal constructor for creating a tree with a pre-loaded cache.
+    /// </summary>
+    private MerkleTree(List<byte[]> leafData, IHashFunction hashFunction, CacheData cache)
+        : base(hashFunction)
+    {
+        LeafCount = leafData.Count;
+        LeafData = leafData;
+        
+        // Build tree normally (cache will be used during proof generation, not construction)
+        var (root, height, leafNodes, _) = BuildTree(leafData, null);
+        Root = root;
+        Height = height;
+        LeafNodes = leafNodes;
+        Cache = cache;
+
+        // Validate cache against built tree
+        if (cache.Metadata.TreeHeight != Height)
+        {
+            throw new ArgumentException(
+                $"Cache tree height {cache.Metadata.TreeHeight} does not match built tree height {Height}.",
+                nameof(cache));
+        }
+    }
+
+    /// <summary>
+    /// Checks if the tree has a cache available.
+    /// </summary>
+    /// <returns>True if a cache is available, false otherwise.</returns>
+    public bool HasCache()
+    {
+        return Cache != null;
+    }
+
+    /// <summary>
+    /// Gets information about the cache, if available.
+    /// </summary>
+    /// <returns>Cache metadata if cache is available, null otherwise.</returns>
+    public CacheMetadata? GetCacheMetadata()
+    {
+        return Cache?.Metadata;
     }
 }
