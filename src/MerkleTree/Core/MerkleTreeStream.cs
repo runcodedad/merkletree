@@ -116,6 +116,28 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
                 if (enableCaching)
                 {
                     levelsToCache.Add((height + 1, nextLevelFile, nextLevelSize));
+                    
+                    // Implement circular queue: keep only topLevelsToCache + 1 levels
+                    // (+1 because we might need to keep the root temporarily)
+                    // Delete old levels immediately to save storage
+                    if (levelsToCache.Count > topLevelsToCache + 1)
+                    {
+                        var oldestLevel = levelsToCache[0];
+                        levelsToCache.RemoveAt(0);
+                        
+                        // Delete the file immediately to save storage
+                        try
+                        {
+                            if (File.Exists(oldestLevel.filePath))
+                            {
+                                File.Delete(oldestLevel.filePath);
+                            }
+                        }
+                        catch
+                        {
+                            // Best effort cleanup - continue if delete fails
+                        }
+                    }
                 }
                 else
                 {
@@ -157,24 +179,23 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
             // Build cache file if caching is enabled
             if (enableCaching && levelsToCache.Count > 0)
             {
-                // Filter out the root level (it's always available and shouldn't be cached)
+                // Filter out the root level (it's at index 'height' and shouldn't be cached)
                 var levelsToActuallyCache = levelsToCache.Where(l => l.level < height).ToList();
                 
                 if (levelsToActuallyCache.Count > 0)
                 {
-                    // Determine which levels to keep: the top N levels (closest to root, excluding root itself)
-                    // For efficiency, keep only topLevelsToCache levels and delete the rest
-                    int levelsToKeep = Math.Min(topLevelsToCache, levelsToActuallyCache.Count);
-                    int startIndex = levelsToActuallyCache.Count - levelsToKeep;
-                    
-                    // Delete level files we won't cache to save storage
-                    for (int i = 0; i < startIndex; i++)
+                    // Keep only the top topLevelsToCache levels (closest to root)
+                    // Delete any excess levels that we don't need
+                    while (levelsToActuallyCache.Count > topLevelsToCache)
                     {
+                        var oldestLevel = levelsToActuallyCache[0];
+                        levelsToActuallyCache.RemoveAt(0);
+                        
                         try
                         {
-                            if (File.Exists(levelsToActuallyCache[i].filePath))
+                            if (File.Exists(oldestLevel.filePath))
                             {
-                                File.Delete(levelsToActuallyCache[i].filePath);
+                                File.Delete(oldestLevel.filePath);
                             }
                         }
                         catch
@@ -183,16 +204,10 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
                         }
                     }
                     
-                    // Keep only the top levels
-                    var finalLevelsToCache = levelsToActuallyCache.Skip(startIndex).ToList();
-                    
-                    if (finalLevelsToCache.Count > 0)
-                    {
-                        int startLevel = finalLevelsToCache[0].level;
-                        int endLevel = finalLevelsToCache[finalLevelsToCache.Count - 1].level;
+                    int startLevel = levelsToActuallyCache[0].level;
+                    int endLevel = levelsToActuallyCache[levelsToActuallyCache.Count - 1].level;
 
-                        await BuildCacheFileAsync(finalLevelsToCache, startLevel, endLevel, height, cacheFilePath!, cancellationToken);
-                    }
+                    await BuildCacheFileAsync(levelsToActuallyCache, startLevel, endLevel, height, cacheFilePath!, cancellationToken);
                 }
             }
 
