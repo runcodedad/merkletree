@@ -386,6 +386,9 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
         // Track the current index as we traverse up the tree
         long currentIndex = leafIndex;
 
+        // Create a session-local cache to avoid re-reading the same leaves during this proof generation
+        var sessionCache = new Dictionary<(int level, long index), byte[]>();
+
         // Process each level from leaf to root
         for (int level = 0; level < height; level++)
         {
@@ -452,52 +455,17 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
                 }
                 else
                 {
-                    // Higher levels: compute from previous level
-                    // We need the hash at currentIndex from the previous level
-                    int prevLevel = level - 1;
-                    long prevLevelSize = GetLevelSize(leafCount, prevLevel);
-                    
-                    // Get the two children of the current node
-                    long leftChildIndex = currentIndex * 2;
-                    long rightChildIndex = currentIndex * 2 + 1;
-                    
-                    byte[] leftChildHash = await GetHashAtIndexAsync(leafData, prevLevel, leftChildIndex, leafCount, cache, cancellationToken);
-                    byte[] rightChildHash;
-                    
-                    if (rightChildIndex < prevLevelSize)
-                    {
-                        rightChildHash = await GetHashAtIndexAsync(leafData, prevLevel, rightChildIndex, leafCount, cache, cancellationToken);
-                    }
-                    else
-                    {
-                        rightChildHash = CreatePaddingHash(leftChildHash);
-                    }
-                    
-                    // Compute current node
-                    byte[] currentHash = ComputeParentHash(leftChildHash, rightChildHash);
-                    
-                    // Now compute sibling
+                    // Higher levels: only compute the sibling hash
                     if (siblingIndex < levelSize)
                     {
-                        leftChildIndex = siblingIndex * 2;
-                        rightChildIndex = siblingIndex * 2 + 1;
-                        
-                        leftChildHash = await GetHashAtIndexAsync(leafData, prevLevel, leftChildIndex, leafCount, cache, cancellationToken);
-                        
-                        if (rightChildIndex < prevLevelSize)
-                        {
-                            rightChildHash = await GetHashAtIndexAsync(leafData, prevLevel, rightChildIndex, leafCount, cache, cancellationToken);
-                        }
-                        else
-                        {
-                            rightChildHash = CreatePaddingHash(leftChildHash);
-                        }
-                        
-                        siblingHash = ComputeParentHash(leftChildHash, rightChildHash);
+                        // Sibling exists, compute it using optimized subtree building with session cache
+                        siblingHash = await GetHashAtIndexWithSessionCacheAsync(leafData, level, siblingIndex, leafCount, cache, sessionCache, cancellationToken);
                     }
                     else
                     {
-                        // No sibling - use padding
+                        // No sibling - need to compute current node to create padding
+                        // This only happens for odd nodes at this level
+                        byte[] currentHash = await GetHashAtIndexWithSessionCacheAsync(leafData, level, currentIndex, leafCount, cache, sessionCache, cancellationToken);
                         siblingHash = CreatePaddingHash(currentHash);
                     }
                 }
@@ -537,23 +505,53 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
     }
 
     /// <summary>
+    /// Gets the hash at a specific index in a specific level asynchronously, using a session cache to avoid redundant reads.
+    /// </summary>
+    private async Task<byte[]> GetHashAtIndexWithSessionCacheAsync(
+        IAsyncEnumerable<byte[]> leafData,
+        int level,
+        long index,
+        long leafCount,
+        CacheData? cache,
+        Dictionary<(int level, long index), byte[]> sessionCache,
+        CancellationToken cancellationToken)
+    {
+        // Try session cache first (for nodes computed in this proof generation)
+        if (sessionCache.TryGetValue((level, index), out var sessionCachedHash))
+        {
+            return sessionCachedHash;
+        }
+
+        // Try persistent cache
+        if (cache != null && cache.TryGetNode(level, index, out var cachedHash))
+        {
+            // Store in session cache for potential reuse
+            sessionCache[(level, index)] = cachedHash;
+            return cachedHash;
+        }
+
+        // Compute the hash using selective subtree recomputation
+        byte[] hash = await GetHashAtIndexAsync(leafData, level, index, leafCount, cache, sessionCache, cancellationToken);
+        
+        // Store in session cache for potential reuse
+        sessionCache[(level, index)] = hash;
+        
+        return hash;
+    }
+
+    /// <summary>
     /// Gets the hash at a specific index in a specific level asynchronously.
     /// </summary>
     private async Task<byte[]> GetHashAtIndexAsync(
         IAsyncEnumerable<byte[]> leafData,
-        long level,
+        int level,
         long index,
         long leafCount,
         CacheData? cache,
+        Dictionary<(int level, long index), byte[]> sessionCache,
         CancellationToken cancellationToken)
     {
-        // Try cache first
-        if (cache != null && cache.TryGetNode((int)level, index, out var cachedHash))
-        {
-            return cachedHash;
-        }
-
-        // Compute the hash
+        // Compute the hash using selective subtree recomputation
         byte[] hash;
         
         if (level == 0)
@@ -579,27 +577,123 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
         }
         else
         {
-            // Higher level: compute from children
-            long prevLevelSize = GetLevelSize(leafCount, (int)(level - 1));
-            long leftChildIndex = index * 2;
-            long rightChildIndex = index * 2 + 1;
+            // Higher level: compute using optimized subtree building
+            // Calculate the leaf range needed for this node
+            var (startLeafIndex, endLeafIndex) = GetLeafRangeForNode(level, index, leafCount);
             
-            byte[] leftChildHash = await GetHashAtIndexAsync(leafData, level - 1, leftChildIndex, leafCount, cache, cancellationToken);
-            byte[] rightChildHash;
-            
-            if (rightChildIndex < prevLevelSize)
-            {
-                rightChildHash = await GetHashAtIndexAsync(leafData, level - 1, rightChildIndex, leafCount, cache, cancellationToken);
-            }
-            else
-            {
-                rightChildHash = CreatePaddingHash(leftChildHash);
-            }
-            
-            hash = ComputeParentHash(leftChildHash, rightChildHash);
+            // Build minimal subtree from leaf range
+            hash = await BuildSubtreeHashAsync(leafData, level, index, startLeafIndex, endLeafIndex, leafCount, cache, sessionCache, cancellationToken);
         }
         
         return hash;
+    }
+
+    /// <summary>
+    /// Calculates the range of leaf indices needed to compute a node at a given level and index.
+    /// </summary>
+    /// <param name="level">The level of the target node.</param>
+    /// <param name="index">The index of the target node at that level.</param>
+    /// <param name="leafCount">The total number of leaves in the tree.</param>
+    /// <returns>A tuple containing the start (inclusive) and end (exclusive) leaf indices.</returns>
+    private static (long startLeafIndex, long endLeafIndex) GetLeafRangeForNode(int level, long index, long leafCount)
+    {
+        // Each node at level L covers 2^L leaves
+        long leavesPerNode = 1L << level;
+        long startLeafIndex = index * leavesPerNode;
+        long endLeafIndex = Math.Min(startLeafIndex + leavesPerNode, leafCount);
+        
+        return (startLeafIndex, endLeafIndex);
+    }
+
+    /// <summary>
+    /// Builds a subtree hash by reading only the necessary leaf range and computing upward.
+    /// </summary>
+    /// <param name="leafData">The leaf data stream.</param>
+    /// <param name="targetLevel">The level of the target node to compute.</param>
+    /// <param name="targetIndex">The index of the target node at that level.</param>
+    /// <param name="startLeafIndex">The start index of the leaf range (inclusive).</param>
+    /// <param name="endLeafIndex">The end index of the leaf range (exclusive).</param>
+    /// <param name="leafCount">The total number of leaves in the tree.</param>
+    /// <param name="cache">Optional cache for intermediate results.</param>
+    /// <param name="sessionCache">Session-local cache to avoid redundant computations within this proof generation.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The hash of the target node.</returns>
+    private async Task<byte[]> BuildSubtreeHashAsync(
+        IAsyncEnumerable<byte[]> leafData,
+        int targetLevel,
+        long targetIndex,
+        long startLeafIndex,
+        long endLeafIndex,
+        long leafCount,
+        CacheData? cache,
+        Dictionary<(int level, long index), byte[]> sessionCache,
+        CancellationToken cancellationToken)
+    {
+        // Read the required leaves in a single pass
+        var leafHashes = new List<byte[]>();
+        long currentIndex = 0;
+        
+        await foreach (var leaf in leafData.WithCancellation(cancellationToken))
+        {
+            if (currentIndex >= startLeafIndex && currentIndex < endLeafIndex)
+            {
+                var hash = ComputeHash(leaf);
+                leafHashes.Add(hash);
+                // Store in session cache
+                sessionCache[(0, startLeafIndex + leafHashes.Count - 1)] = hash;
+            }
+            
+            currentIndex++;
+            
+            // Optimization: stop once we've read all needed leaves
+            if (currentIndex >= endLeafIndex)
+                break;
+        }
+        
+        if (leafHashes.Count != (endLeafIndex - startLeafIndex))
+            throw new InvalidOperationException($"Expected {endLeafIndex - startLeafIndex} leaves, but got {leafHashes.Count}.");
+        
+        // Build the subtree level by level from the leaf hashes
+        var currentLevel = leafHashes;
+        long currentLevelStartIndex = startLeafIndex;
+        
+        for (int level = 0; level < targetLevel; level++)
+        {
+            var nextLevel = new List<byte[]>();
+            long nextLevelStartIndex = currentLevelStartIndex / 2;
+            
+            for (int i = 0; i < currentLevel.Count; i += 2)
+            {
+                byte[] leftHash = currentLevel[i];
+                byte[] rightHash;
+                
+                if (i + 1 < currentLevel.Count)
+                {
+                    rightHash = currentLevel[i + 1];
+                }
+                else
+                {
+                    // Odd number of nodes at this level - use padding
+                    rightHash = CreatePaddingHash(leftHash);
+                }
+                
+                byte[] parentHash = ComputeParentHash(leftHash, rightHash);
+                nextLevel.Add(parentHash);
+                
+                // Store in session cache
+                long nodeIndexInLevel = nextLevelStartIndex + nextLevel.Count - 1;
+                sessionCache[(level + 1, nodeIndexInLevel)] = parentHash;
+            }
+            
+            currentLevel = nextLevel;
+            currentLevelStartIndex = nextLevelStartIndex;
+        }
+        
+        // At target level, we should have exactly one hash (the target node)
+        if (currentLevel.Count != 1)
+            throw new InvalidOperationException($"Expected 1 node at target level {targetLevel}, but computed {currentLevel.Count}.");
+        
+        return currentLevel[0];
     }
 
 
