@@ -1,105 +1,61 @@
 namespace MerkleTree.Cache;
 
 /// <summary>
-/// Configuration for Merkle tree cache generation.
+/// Configuration for Merkle tree cache generation during streaming.
 /// </summary>
 /// <remarks>
-/// This class defines which levels of the Merkle tree should be cached to accelerate
-/// proof generation for large datasets. Caching upper levels reduces the need for
-/// recomputation when generating proofs.
+/// This class defines caching settings for MerkleTreeStream, including the file path
+/// and the number of top levels to cache. It simplifies cache configuration by combining
+/// related settings into a single object.
 /// </remarks>
 public class CacheConfiguration
 {
     /// <summary>
-    /// Gets the starting level to cache (inclusive).
+    /// Gets the file path where the cache should be saved.
     /// </summary>
     /// <remarks>
-    /// Level 0 represents the leaves. Higher levels are closer to the root.
-    /// Typically, caching starts from a level above the leaves to avoid caching
-    /// the entire dataset.
+    /// If null or empty, caching is disabled.
     /// </remarks>
-    public int StartLevel { get; }
+    public string? FilePath { get; }
 
     /// <summary>
-    /// Gets the ending level to cache (inclusive).
+    /// Gets the number of top levels to cache (excluding the root).
     /// </summary>
     /// <remarks>
-    /// Must be greater than or equal to StartLevel and less than the tree height.
-    /// The root level itself is typically not cached as it's always available.
+    /// Higher values cache more levels, improving proof generation speed but using more storage.
+    /// The default is 5 levels.
     /// </remarks>
-    public int EndLevel { get; }
+    public int TopLevelsToCache { get; }
 
     /// <summary>
     /// Gets whether caching is enabled.
     /// </summary>
-    public bool IsEnabled => StartLevel >= 0 && EndLevel >= StartLevel;
+    /// <remarks>
+    /// Caching is enabled when FilePath is not null/empty and TopLevelsToCache is positive.
+    /// </remarks>
+    public bool IsEnabled => !string.IsNullOrEmpty(FilePath) && TopLevelsToCache > 0;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CacheConfiguration"/> class.
     /// </summary>
-    /// <param name="startLevel">The starting level to cache.</param>
-    /// <param name="endLevel">The ending level to cache.</param>
-    /// <exception cref="ArgumentException">Thrown when parameters are invalid.</exception>
-    public CacheConfiguration(int startLevel, int endLevel)
-        : this(startLevel, endLevel, true)
+    /// <param name="filePath">The file path where the cache should be saved.</param>
+    /// <param name="topLevelsToCache">The number of top levels to cache (default 5).</param>
+    /// <exception cref="ArgumentException">Thrown when topLevelsToCache is negative.</exception>
+    public CacheConfiguration(string? filePath, int topLevelsToCache = 5)
     {
-    }
+        if (topLevelsToCache < 0)
+            throw new ArgumentException("Top levels to cache must be non-negative.", nameof(topLevelsToCache));
 
-    /// <summary>
-    /// Internal constructor that allows bypassing validation for special cases.
-    /// </summary>
-    private CacheConfiguration(int startLevel, int endLevel, bool validate)
-    {
-        if (validate)
-        {
-            if (startLevel < 0)
-                throw new ArgumentException("Start level must be non-negative.", nameof(startLevel));
-            if (endLevel < startLevel)
-                throw new ArgumentException("End level must be greater than or equal to start level.", nameof(endLevel));
-        }
-
-        StartLevel = startLevel;
-        EndLevel = endLevel;
-    }
-
-    /// <summary>
-    /// Creates a cache configuration for the top N levels of a tree.
-    /// </summary>
-    /// <param name="treeHeight">The height of the tree.</param>
-    /// <param name="topLevels">The number of top levels to cache.</param>
-    /// <returns>A cache configuration for the specified top levels.</returns>
-    /// <exception cref="ArgumentException">Thrown when parameters are invalid.</exception>
-    /// <remarks>
-    /// This is a convenience method for creating a cache that stores the topmost levels
-    /// of the tree, which are most frequently accessed during proof generation.
-    /// </remarks>
-    public static CacheConfiguration ForTopLevels(int treeHeight, int topLevels)
-    {
-        if (treeHeight < 0)
-            throw new ArgumentException("Tree height must be non-negative.", nameof(treeHeight));
-        if (topLevels <= 0)
-            throw new ArgumentException("Top levels must be positive.", nameof(topLevels));
-        if (topLevels > treeHeight)
-            throw new ArgumentException($"Top levels ({topLevels}) cannot exceed tree height ({treeHeight}).", nameof(topLevels));
-
-        // Calculate start level: if we want top 3 levels of a height-5 tree,
-        // we cache levels 2, 3, 4 (height-topLevels to height-1)
-        int startLevel = Math.Max(0, treeHeight - topLevels);
-        int endLevel = treeHeight - 1;
-
-        return new CacheConfiguration(startLevel, endLevel);
+        FilePath = filePath;
+        TopLevelsToCache = topLevelsToCache;
     }
 
     /// <summary>
     /// Creates a disabled cache configuration.
     /// </summary>
     /// <returns>A cache configuration that disables caching.</returns>
-    /// <remarks>
-    /// This creates a configuration where IsEnabled returns false by using
-    /// a negative start level to indicate disabled state.
-    /// </remarks>
     public static CacheConfiguration Disabled()
     {
-        return new CacheConfiguration(-1, -1, validate: false);
+        return new CacheConfiguration(null, 0);
     }
 }

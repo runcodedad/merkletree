@@ -352,11 +352,11 @@ async IAsyncEnumerable<byte[]> StreamLeafData()
 
 var stream = new MerkleTreeStream(new Sha256HashFunction());
 
-// Build tree and cache top 5 levels in a single pass
-var metadata = await stream.BuildAsync(
-    StreamLeafData(), 
-    cacheFilePath: "merkle.cache", 
-    topLevelsToCache: 5);
+// Configure cache: save to file and cache top 5 levels
+var cacheConfig = new CacheConfiguration("merkle.cache", topLevelsToCache: 5);
+
+// Build tree and cache in a single pass
+var metadata = await stream.BuildAsync(StreamLeafData(), cacheConfig);
 
 Console.WriteLine($"Tree built and cache saved to merkle.cache");
 Console.WriteLine($"Root Hash: {Convert.ToHexString(metadata.RootHash)}");
@@ -365,11 +365,11 @@ Console.WriteLine($"Root Hash: {Convert.ToHexString(metadata.RootHash)}");
 ### Using Cache for Proof Generation
 
 ```csharp
-// Load cache from file
-var cache = MerkleTreeStream.LoadCache("merkle.cache");
+// Load cache from file using CacheHelper
+var cache = CacheHelper.LoadCache("merkle.cache");
 
 // Convert cache to dictionary format for proof generation
-var cacheDict = MerkleTreeStream.CacheToDictionary(cache);
+var cacheDict = CacheHelper.CacheToDictionary(cache);
 
 // Generate proof with cache - avoids recomputing cached nodes
 var stream = new MerkleTreeStream(new Sha256HashFunction());
@@ -387,15 +387,17 @@ Console.WriteLine($"Proof valid: {isValid}");
 ### Cache Configuration Options
 
 ```csharp
-// Cache specific levels (e.g., levels 3 through 7)
-var config1 = new CacheConfiguration(startLevel: 3, endLevel: 7);
+// Cache top 5 levels (default)
+var config1 = new CacheConfiguration("merkle.cache", topLevelsToCache: 5);
 
-// Cache top N levels (automatically calculates range)
-var config2 = CacheConfiguration.ForTopLevels(treeHeight: 10, topLevels: 5);
-// This caches levels 5-9 (top 5 levels of a height-10 tree)
+// Cache top 10 levels for larger trees
+var config2 = new CacheConfiguration("merkle.cache", topLevelsToCache: 10);
 
-// Disabled cache (for comparison or testing)
+// Disabled cache (no file path provided)
 var config3 = CacheConfiguration.Disabled();
+
+// Or simply pass null to BuildAsync to disable caching
+var metadata = await stream.BuildAsync(leafData, cacheConfig: null);
 ```
 
 ### Cache Benefits for Streaming

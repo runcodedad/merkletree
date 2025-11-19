@@ -49,7 +49,8 @@ public class MerkleTreeStreamCacheTests
         try
         {
             // Act
-            var metadata = await stream.BuildAsync(leafData, cacheFilePath: tempFile, topLevelsToCache: 2);
+            var cacheConfig = new CacheConfiguration(tempFile, topLevelsToCache: 2);
+            var metadata = await stream.BuildAsync(leafData, cacheConfig);
 
             // Assert
             Assert.NotNull(metadata);
@@ -85,7 +86,8 @@ public class MerkleTreeStreamCacheTests
         try
         {
             // Act
-            var metadata = await stream.BuildAsync(TrackedLeafData(), cacheFilePath: tempFile, topLevelsToCache: 3);
+            var cacheConfig = new CacheConfiguration(tempFile, topLevelsToCache: 3);
+            var metadata = await stream.BuildAsync(TrackedLeafData(), cacheConfig);
 
             // Assert - Data should only be accessed once (single pass)
             Assert.Equal(16, dataAccessCount);
@@ -108,10 +110,11 @@ public class MerkleTreeStreamCacheTests
 
         try
         {
-            await stream.BuildAsync(leafData, cacheFilePath: tempFile, topLevelsToCache: 2);
+            var cacheConfig = new CacheConfiguration(tempFile, topLevelsToCache: 2);
+            await stream.BuildAsync(leafData, cacheConfig);
 
             // Act
-            var loadedCache = MerkleTreeStream.LoadCache(tempFile);
+            var loadedCache = CacheHelper.LoadCache(tempFile);
 
             // Assert
             Assert.NotNull(loadedCache);
@@ -134,11 +137,12 @@ public class MerkleTreeStreamCacheTests
 
         try
         {
-            await stream.BuildAsync(leafData, cacheFilePath: tempFile, topLevelsToCache: 2);
-            var cache = MerkleTreeStream.LoadCache(tempFile);
+            var cacheConfig = new CacheConfiguration(tempFile, topLevelsToCache: 2);
+            await stream.BuildAsync(leafData, cacheConfig);
+            var cache = CacheHelper.LoadCache(tempFile);
 
             // Act
-            var dictionary = MerkleTreeStream.CacheToDictionary(cache);
+            var dictionary = CacheHelper.CacheToDictionary(cache);
 
             // Assert
             Assert.NotNull(dictionary);
@@ -174,9 +178,10 @@ public class MerkleTreeStreamCacheTests
 
         try
         {
-            var metadata = await stream.BuildAsync(leafData1, cacheFilePath: tempFile, topLevelsToCache: 3);
-            var cache = MerkleTreeStream.LoadCache(tempFile);
-            var cacheDict = MerkleTreeStream.CacheToDictionary(cache);
+            var cacheConfig = new CacheConfiguration(tempFile, topLevelsToCache: 3);
+            var metadata = await stream.BuildAsync(leafData1, cacheConfig);
+            var cache = CacheHelper.LoadCache(tempFile);
+            var cacheDict = CacheHelper.CacheToDictionary(cache);
             var leafData2 = CreateLeafDataAsync(16);
 
             // Act
@@ -207,9 +212,10 @@ public class MerkleTreeStreamCacheTests
 
         try
         {
-            var metadata = await stream.BuildAsync(leafData1, cacheFilePath: tempFile, topLevelsToCache: 2);
-            var cache = MerkleTreeStream.LoadCache(tempFile);
-            var cacheDict = MerkleTreeStream.CacheToDictionary(cache);
+            var cacheConfig = new CacheConfiguration(tempFile, topLevelsToCache: 2);
+            var metadata = await stream.BuildAsync(leafData1, cacheConfig);
+            var cache = CacheHelper.LoadCache(tempFile);
+            var cacheDict = CacheHelper.CacheToDictionary(cache);
             
             // Act - Generate proof with cache
             var leafData2 = CreateLeafDataAsync(16);
@@ -254,8 +260,9 @@ public class MerkleTreeStreamCacheTests
         try
         {
             // Act - Cache top 2 levels
-            var metadata = await stream.BuildAsync(leafData, cacheFilePath: tempFile, topLevelsToCache: 2);
-            var cache = MerkleTreeStream.LoadCache(tempFile);
+            var cacheConfig = new CacheConfiguration(tempFile, topLevelsToCache: 2);
+            var metadata = await stream.BuildAsync(leafData, cacheConfig);
+            var cache = CacheHelper.LoadCache(tempFile);
 
             // Assert
             Assert.NotNull(cache);
@@ -290,7 +297,8 @@ public class MerkleTreeStreamCacheTests
         try
         {
             // Act
-            var metadata = await stream.BuildAsync(leafData, cacheFilePath: tempFile, topLevelsToCache: 0);
+            var cacheConfig = new CacheConfiguration(tempFile, topLevelsToCache: 0);
+            var metadata = await stream.BuildAsync(leafData, cacheConfig);
 
             // Assert
             Assert.NotNull(metadata);
