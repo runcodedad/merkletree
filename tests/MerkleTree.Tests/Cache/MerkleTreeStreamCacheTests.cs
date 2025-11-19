@@ -118,7 +118,9 @@ public class MerkleTreeStreamCacheTests
 
             // Assert
             Assert.NotNull(loadedCache);
-            Assert.True(loadedCache.Levels.Count > 0);
+            Assert.NotNull(loadedCache.Data);
+            Assert.NotNull(loadedCache.Statistics);
+            Assert.True(loadedCache.Data.Levels.Count > 0);
         }
         finally
         {
@@ -128,7 +130,7 @@ public class MerkleTreeStreamCacheTests
     }
 
     [Fact]
-    public async Task CacheToDictionary_ConvertsCorrectly()
+    public async Task CacheWithStats_TracksStatistics()
     {
         // Arrange
         var stream = new MerkleTreeStream();
@@ -141,25 +143,18 @@ public class MerkleTreeStreamCacheTests
             await stream.BuildAsync(leafData, cacheConfig);
             var cache = CacheHelper.LoadCache(tempFile);
 
-            // Act
-            var dictionary = CacheHelper.CacheToDictionary(cache);
+            // Act - Use TryGetNode to trigger statistics tracking
+            bool hit = cache.TryGetNode(1, 0, out var value);
+            bool miss = cache.TryGetNode(0, 999, out var missValue);
 
             // Assert
-            Assert.NotNull(dictionary);
-            Assert.True(dictionary.Count > 0);
-            
-            // Verify we can look up cached values
-            foreach (var kvp in cache.Levels)
-            {
-                int level = kvp.Key;
-                var cachedLevel = kvp.Value;
-                
-                for (long i = 0; i < cachedLevel.NodeCount; i++)
-                {
-                    Assert.True(dictionary.ContainsKey((level, i)));
-                    Assert.Equal(cachedLevel.GetNode(i), dictionary[(level, i)]);
-                }
-            }
+            Assert.True(hit);
+            Assert.NotNull(value);
+            Assert.False(miss);
+            Assert.Equal(1, cache.Statistics.Hits);
+            Assert.Equal(1, cache.Statistics.Misses);
+            Assert.Equal(2, cache.Statistics.TotalLookups);
+            Assert.Equal(50.0, cache.Statistics.HitRate);
         }
         finally
         {
@@ -181,11 +176,10 @@ public class MerkleTreeStreamCacheTests
             var cacheConfig = new CacheConfiguration(tempFile, topLevelsToCache: 3);
             var metadata = await stream.BuildAsync(leafData1, cacheConfig);
             var cache = CacheHelper.LoadCache(tempFile);
-            var cacheDict = CacheHelper.CacheToDictionary(cache);
             var leafData2 = CreateLeafDataAsync(16);
 
             // Act
-            var proof = await stream.GenerateProofAsync(leafData2, 5, metadata.LeafCount, cacheDict);
+            var proof = await stream.GenerateProofAsync(leafData2, 5, metadata.LeafCount, cache);
 
             // Assert
             Assert.NotNull(proof);
@@ -194,6 +188,10 @@ public class MerkleTreeStreamCacheTests
             
             // Verify proof
             Assert.True(proof.Verify(metadata.RootHash, new Sha256HashFunction()));
+            
+            // Verify cache statistics are tracked
+            Assert.True(cache.Statistics.TotalLookups > 0);
+            Assert.True(cache.Statistics.Hits > 0);
         }
         finally
         {
@@ -215,11 +213,10 @@ public class MerkleTreeStreamCacheTests
             var cacheConfig = new CacheConfiguration(tempFile, topLevelsToCache: 2);
             var metadata = await stream.BuildAsync(leafData1, cacheConfig);
             var cache = CacheHelper.LoadCache(tempFile);
-            var cacheDict = CacheHelper.CacheToDictionary(cache);
             
             // Act - Generate proof with cache
             var leafData2 = CreateLeafDataAsync(16);
-            var proofWithCache = await stream.GenerateProofAsync(leafData2, 5, metadata.LeafCount, cacheDict);
+            var proofWithCache = await stream.GenerateProofAsync(leafData2, 5, metadata.LeafCount, cache);
             
             // Act - Generate proof without cache
             var leafData3 = CreateLeafDataAsync(16);
@@ -266,15 +263,16 @@ public class MerkleTreeStreamCacheTests
 
             // Assert
             Assert.NotNull(cache);
-            Assert.Equal(4, cache.Metadata.TreeHeight);
+            Assert.NotNull(cache.Data);
+            Assert.Equal(4, cache.Data.Metadata.TreeHeight);
             
             // Should cache levels 2 and 3 (top 2 levels, excluding root at level 4)
-            Assert.Equal(2, cache.Metadata.StartLevel);
-            Assert.Equal(3, cache.Metadata.EndLevel);
+            Assert.Equal(2, cache.Data.Metadata.StartLevel);
+            Assert.Equal(3, cache.Data.Metadata.EndLevel);
             
             // Verify the levels exist
-            Assert.True(cache.Levels.ContainsKey(2));
-            Assert.True(cache.Levels.ContainsKey(3));
+            Assert.True(cache.Data.Levels.ContainsKey(2));
+            Assert.True(cache.Data.Levels.ContainsKey(3));
         }
         finally
         {

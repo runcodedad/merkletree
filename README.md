@@ -362,14 +362,11 @@ Console.WriteLine($"Tree built and cache saved to merkle.cache");
 Console.WriteLine($"Root Hash: {Convert.ToHexString(metadata.RootHash)}");
 ```
 
-### Using Cache for Proof Generation
+### Using Cache for Proof Generation with Statistics
 
 ```csharp
-// Load cache from file using CacheHelper
+// Load cache from file - automatically includes statistics tracking
 var cache = CacheHelper.LoadCache("merkle.cache");
-
-// Convert cache to dictionary format for proof generation
-var cacheDict = CacheHelper.CacheToDictionary(cache);
 
 // Generate proof with cache - avoids recomputing cached nodes
 var stream = new MerkleTreeStream(new Sha256HashFunction());
@@ -377,11 +374,15 @@ var proof = await stream.GenerateProofAsync(
     StreamLeafData(), 
     leafIndex: 1000, 
     leafCount: metadata.LeafCount,
-    cache: cacheDict);
+    cache: cache);
 
 // Verify proof
 bool isValid = proof.Verify(metadata.RootHash, new Sha256HashFunction());
 Console.WriteLine($"Proof valid: {isValid}");
+
+// View cache statistics
+Console.WriteLine(cache.Statistics);
+// Output: "Cache Stats: 30 hits, 10 misses, 75.00% hit rate (40 total lookups)"
 ```
 
 ### Cache Configuration Options

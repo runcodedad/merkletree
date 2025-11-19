@@ -382,7 +382,7 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
         IAsyncEnumerable<byte[]> leafData,
         long leafIndex,
         long leafCount,
-        Dictionary<(int level, long index), byte[]>? cache = null,
+        CacheWithStats? cache = null,
         CancellationToken cancellationToken = default)
     {
         if (leafData == null)
@@ -445,7 +445,7 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
             byte[] siblingHash;
             
             // Try to get from cache first
-            if (cache != null && cache.TryGetValue((level, siblingIndex), out var cachedHash))
+            if (cache != null && cache.TryGetNode(level, siblingIndex, out var cachedHash))
             {
                 siblingHash = cachedHash;
             }
@@ -588,11 +588,11 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
         long level,
         long index,
         long leafCount,
-        Dictionary<(int level, long index), byte[]>? cache,
+        CacheWithStats? cache,
         CancellationToken cancellationToken)
     {
         // Try cache first
-        if (cache != null && cache.TryGetValue(((int)level, index), out var cachedHash))
+        if (cache != null && cache.TryGetNode((int)level, index, out var cachedHash))
         {
             return cachedHash;
         }
