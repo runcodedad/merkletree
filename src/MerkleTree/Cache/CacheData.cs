@@ -6,6 +6,7 @@ namespace MerkleTree.Cache;
 /// <remarks>
 /// This class aggregates the complete cache information: metadata about the tree
 /// and hash function, plus the actual cached node data organized by level.
+/// Includes integrated statistics tracking for cache operations.
 /// </remarks>
 public class CacheData
 {
@@ -22,6 +23,15 @@ public class CacheData
     /// Each value is a CachedLevel containing all nodes at that level.
     /// </remarks>
     public IReadOnlyDictionary<int, CachedLevel> Levels { get; }
+
+    /// <summary>
+    /// Gets the statistics tracker for cache operations.
+    /// </summary>
+    /// <remarks>
+    /// Statistics are automatically tracked when TryGetNode is called during proof generation
+    /// and other cache lookup operations.
+    /// </remarks>
+    public CacheStatistics Statistics { get; }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CacheData"/> class.
@@ -59,6 +69,7 @@ public class CacheData
 
         Metadata = metadata;
         Levels = levels;
+        Statistics = new CacheStatistics();
     }
 
     /// <summary>
@@ -86,5 +97,35 @@ public class CacheData
     public byte[] GetNode(int level, long index)
     {
         return GetLevel(level).GetNode(index);
+    }
+
+    /// <summary>
+    /// Attempts to get a cached node value and records the lookup result in statistics.
+    /// </summary>
+    /// <param name="level">The level of the node.</param>
+    /// <param name="index">The index of the node within the level.</param>
+    /// <param name="value">The cached value if found.</param>
+    /// <returns>True if the node was found in cache; otherwise, false.</returns>
+    /// <remarks>
+    /// This method automatically tracks cache hits and misses in the Statistics property.
+    /// Use this method during proof generation to benefit from automatic statistics tracking.
+    /// </remarks>
+    public bool TryGetNode(int level, long index, out byte[] value)
+    {
+        // Check if level exists in cache
+        if (Levels.TryGetValue(level, out var cachedLevel))
+        {
+            // Check if index is valid for this level
+            if (index >= 0 && index < cachedLevel.NodeCount)
+            {
+                value = cachedLevel.GetNode(index);
+                Statistics.RecordHit();
+                return true;
+            }
+        }
+
+        value = null!;
+        Statistics.RecordMiss();
+        return false;
     }
 }
