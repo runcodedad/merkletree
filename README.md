@@ -516,6 +516,38 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   - Full integration with `MerkleTreeStream` API
 - Comprehensive test coverage (167+ tests)
 
+## Performance Benchmarks
+
+The library includes a comprehensive benchmark suite to measure and track performance characteristics. Benchmarks cover:
+
+- **Tree building time** vs. leaf count (10 to 10,000+ leaves)
+- **Proof generation time** vs. tree size
+- **Proof verification time** for different proof heights
+- **Memory usage** during tree building and operations
+- **Cache hit/miss performance** for streaming operations
+- **Serialization/deserialization speed** for proofs and metadata
+
+### Running Benchmarks
+
+```bash
+# Run all benchmarks
+cd benchmarks/MerkleTree.Benchmarks
+dotnet run -c Release
+
+# Run specific benchmark categories
+dotnet run -c Release -- --filter *TreeBuilding*
+dotnet run -c Release -- --filter *ProofGeneration*
+dotnet run -c Release -- --filter *Cache*
+
+# Or use the convenience scripts
+./run-benchmarks.sh all      # Unix/Linux/macOS
+run-benchmarks.cmd all       # Windows
+```
+
+Results are exported in multiple formats (Markdown, HTML, CSV, JSON) to `BenchmarkDotNet.Artifacts/results/`.
+
+For detailed information about benchmarks, see [benchmarks/MerkleTree.Benchmarks/README.md](benchmarks/MerkleTree.Benchmarks/README.md).
+
 ## Support
 
 For questions, issues, or feature requests, please [open an issue](https://github.com/runcodedad/merkletree/issues) on GitHub.
