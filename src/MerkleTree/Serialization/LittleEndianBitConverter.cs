@@ -16,7 +16,7 @@ internal static class LittleEndianBitConverter
     /// <param name="value">The value to write.</param>
     /// <param name="buffer">The destination buffer.</param>
     /// <param name="offset">The offset in the buffer to start writing.</param>
-    public static void WriteInt32LittleEndian(int value, byte[] buffer, int offset)
+    public static void WriteInt32(int value, byte[] buffer, int offset)
     {
         buffer[offset] = (byte)value;
         buffer[offset + 1] = (byte)(value >> 8);
@@ -30,7 +30,7 @@ internal static class LittleEndianBitConverter
     /// <param name="value">The value to write.</param>
     /// <param name="buffer">The destination buffer.</param>
     /// <param name="offset">The offset in the buffer to start writing.</param>
-    public static void WriteInt64LittleEndian(long value, byte[] buffer, int offset)
+    public static void WriteInt64(long value, byte[] buffer, int offset)
     {
         buffer[offset] = (byte)value;
         buffer[offset + 1] = (byte)(value >> 8);
@@ -48,7 +48,7 @@ internal static class LittleEndianBitConverter
     /// <param name="buffer">The source buffer.</param>
     /// <param name="offset">The offset in the buffer to start reading.</param>
     /// <returns>The read value.</returns>
-    public static int ReadInt32LittleEndian(byte[] buffer, int offset)
+    public static int ReadInt32(byte[] buffer, int offset)
     {
         return buffer[offset] |
                (buffer[offset + 1] << 8) |
@@ -62,7 +62,7 @@ internal static class LittleEndianBitConverter
     /// <param name="buffer">The source buffer.</param>
     /// <param name="offset">The offset in the buffer to start reading.</param>
     /// <returns>The read value.</returns>
-    public static long ReadInt64LittleEndian(byte[] buffer, int offset)
+    public static long ReadInt64(byte[] buffer, int offset)
     {
         uint lo = (uint)(buffer[offset] |
                         (buffer[offset + 1] << 8) |

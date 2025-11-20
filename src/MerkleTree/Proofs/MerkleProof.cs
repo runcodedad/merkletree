@@ -217,25 +217,25 @@ public class MerkleProof
         result[offset++] = 1;
 
         // Write tree height
-        LittleEndianBitConverter.WriteInt32LittleEndian(TreeHeight, result, offset);
+        LittleEndianBitConverter.WriteInt32(TreeHeight, result, offset);
         offset += 4;
 
         // Write leaf index
-        LittleEndianBitConverter.WriteInt64LittleEndian(LeafIndex, result, offset);
+        LittleEndianBitConverter.WriteInt64(LeafIndex, result, offset);
         offset += 8;
 
         // Write leaf value length and data
-        LittleEndianBitConverter.WriteInt32LittleEndian(LeafValue.Length, result, offset);
+        LittleEndianBitConverter.WriteInt32(LeafValue.Length, result, offset);
         offset += 4;
         LeafValue.CopyTo(result, offset);
         offset += LeafValue.Length;
 
         // Write hash size
-        LittleEndianBitConverter.WriteInt32LittleEndian(hashSize, result, offset);
+        LittleEndianBitConverter.WriteInt32(hashSize, result, offset);
         offset += 4;
 
         // Write orientation bits length and data
-        LittleEndianBitConverter.WriteInt32LittleEndian(orientationBytesLength, result, offset);
+        LittleEndianBitConverter.WriteInt32(orientationBytesLength, result, offset);
         offset += 4;
         orientationBytes.CopyTo(result, offset);
         offset += orientationBytesLength;
@@ -279,21 +279,21 @@ public class MerkleProof
             throw new ArgumentException("Data is too short to contain header fields.", nameof(data));
 
         // Read tree height
-        int treeHeight = LittleEndianBitConverter.ReadInt32LittleEndian(data, offset);
+        int treeHeight = LittleEndianBitConverter.ReadInt32(data, offset);
         offset += 4;
 
         if (treeHeight < 0)
             throw new ArgumentException($"Invalid tree height: {treeHeight}. Must be non-negative.", nameof(data));
 
         // Read leaf index
-        long leafIndex = LittleEndianBitConverter.ReadInt64LittleEndian(data, offset);
+        long leafIndex = LittleEndianBitConverter.ReadInt64(data, offset);
         offset += 8;
 
         if (leafIndex < 0)
             throw new ArgumentException($"Invalid leaf index: {leafIndex}. Must be non-negative.", nameof(data));
 
         // Read leaf value length
-        int leafValueLength = LittleEndianBitConverter.ReadInt32LittleEndian(data, offset);
+        int leafValueLength = LittleEndianBitConverter.ReadInt32(data, offset);
         offset += 4;
 
         if (leafValueLength < 0)
@@ -309,7 +309,7 @@ public class MerkleProof
         // Read hash size
         if (offset + 4 > data.Length)
             throw new ArgumentException("Data is too short to contain hash size.", nameof(data));
-        int hashSize = LittleEndianBitConverter.ReadInt32LittleEndian(data, offset);
+        int hashSize = LittleEndianBitConverter.ReadInt32(data, offset);
         offset += 4;
 
         if (hashSize < 0)
@@ -318,7 +318,7 @@ public class MerkleProof
         // Read orientation bits length
         if (offset + 4 > data.Length)
             throw new ArgumentException("Data is too short to contain orientation bits length.", nameof(data));
-        int orientationBytesLength = LittleEndianBitConverter.ReadInt32LittleEndian(data, offset);
+        int orientationBytesLength = LittleEndianBitConverter.ReadInt32(data, offset);
         offset += 4;
 
         if (orientationBytesLength < 0)
