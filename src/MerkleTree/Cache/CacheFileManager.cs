@@ -66,16 +66,73 @@ public static class CacheFileManager
                 // Read all nodes from this level file
                 var nodes = new List<byte[]>();
                 
-                await using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
-                using (var reader = new BinaryReader(fileStream))
+                try
                 {
-                    for (long i = 0; i < nodeCount; i++)
+                    await using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true))
+                    using (var reader = new BinaryReader(fileStream))
                     {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        int hashLength = reader.ReadInt32();
-                        byte[] hash = reader.ReadBytes(hashLength);
-                        nodes.Add(hash);
+                        for (long i = 0; i < nodeCount; i++)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            
+                            // Validate we have enough data for hash length
+                            if (fileStream.Position + 4 > fileStream.Length)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Unexpected end of file while reading node {i} of {nodeCount} from level {level} file '{filePath}'. " +
+                                    $"File may be truncated or corrupted.");
+                            }
+                            
+                            int hashLength = reader.ReadInt32();
+                            
+                            // Validate hash length is reasonable
+                            if (hashLength < 0)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Invalid hash length {hashLength} for node {i} at level {level} in file '{filePath}'. " +
+                                    $"File may be corrupted.");
+                            }
+                            
+                            if (hashLength != hashSizeInBytes)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Hash length mismatch for node {i} at level {level} in file '{filePath}'. " +
+                                    $"Expected {hashSizeInBytes} bytes, got {hashLength} bytes. File may be corrupted.");
+                            }
+                            
+                            // Validate we have enough data for the hash
+                            if (fileStream.Position + hashLength > fileStream.Length)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Unexpected end of file while reading hash data for node {i} of {nodeCount} from level {level} file '{filePath}'. " +
+                                    $"Expected {hashLength} bytes but only {fileStream.Length - fileStream.Position} bytes remaining. " +
+                                    $"File may be truncated or corrupted.");
+                            }
+                            
+                            byte[] hash = reader.ReadBytes(hashLength);
+                            
+                            // Validate we actually read the expected number of bytes
+                            if (hash.Length != hashLength)
+                            {
+                                throw new InvalidOperationException(
+                                    $"Failed to read complete hash for node {i} at level {level} from file '{filePath}'. " +
+                                    $"Expected {hashLength} bytes, got {hash.Length} bytes. File may be corrupted.");
+                            }
+                            
+                            nodes.Add(hash);
+                        }
                     }
+                }
+                catch (EndOfStreamException ex)
+                {
+                    throw new InvalidOperationException(
+                        $"Unexpected end of stream while reading level {level} from file '{filePath}'. " +
+                        $"Expected {nodeCount} nodes but file ended prematurely. File may be truncated.", ex);
+                }
+                catch (IOException ex)
+                {
+                    throw new InvalidOperationException(
+                        $"I/O error while reading level {level} from file '{filePath}': {ex.Message}", ex);
                 }
 
                 levels[level] = new CachedLevel(level, nodes.ToArray());
