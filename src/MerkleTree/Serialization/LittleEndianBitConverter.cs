@@ -1,14 +1,14 @@
 namespace MerkleTree.Serialization;
 
 /// <summary>
-/// Provides endianness-independent binary serialization helpers.
+/// Provides little-endian byte conversion methods for cross-platform determinism.
 /// </summary>
 /// <remarks>
-/// All methods use little-endian byte order for cross-platform determinism.
-/// This ensures that serialized data is identical across different architectures
-/// and operating systems, regardless of the native endianness.
+/// Similar to <see cref="System.BitConverter"/> but guarantees little-endian byte order
+/// regardless of system architecture. This ensures that serialized data is identical
+/// across different platforms (x86, ARM, big-endian systems, etc.).
 /// </remarks>
-internal static class BinarySerializationHelpers
+internal static class LittleEndianBitConverter
 {
     /// <summary>
     /// Writes a 32-bit signed integer to a byte array in little-endian format.

@@ -102,30 +102,30 @@ public static class CacheSerializer
         result[offset++] = FormatVersion;
 
         // Write tree height
-        BinarySerializationHelpers.WriteInt32LittleEndian(metadata.TreeHeight, result, offset);
+        LittleEndianBitConverter.WriteInt32LittleEndian(metadata.TreeHeight, result, offset);
         offset += 4;
 
         // Write hash function name length and data
-        BinarySerializationHelpers.WriteInt32LittleEndian(hashFunctionNameBytes.Length, result, offset);
+        LittleEndianBitConverter.WriteInt32LittleEndian(hashFunctionNameBytes.Length, result, offset);
         offset += 4;
         hashFunctionNameBytes.CopyTo(result, offset);
         offset += hashFunctionNameBytes.Length;
 
         // Write hash size
-        BinarySerializationHelpers.WriteInt32LittleEndian(metadata.HashSizeInBytes, result, offset);
+        LittleEndianBitConverter.WriteInt32LittleEndian(metadata.HashSizeInBytes, result, offset);
         offset += 4;
 
         // Write start level
-        BinarySerializationHelpers.WriteInt32LittleEndian(metadata.StartLevel, result, offset);
+        LittleEndianBitConverter.WriteInt32LittleEndian(metadata.StartLevel, result, offset);
         offset += 4;
 
         // Write end level
-        BinarySerializationHelpers.WriteInt32LittleEndian(metadata.EndLevel, result, offset);
+        LittleEndianBitConverter.WriteInt32LittleEndian(metadata.EndLevel, result, offset);
         offset += 4;
 
         // Write number of levels
         int numLevels = metadata.EndLevel - metadata.StartLevel + 1;
-        BinarySerializationHelpers.WriteInt32LittleEndian(numLevels, result, offset);
+        LittleEndianBitConverter.WriteInt32LittleEndian(numLevels, result, offset);
         offset += 4;
 
         // Write level data
@@ -134,11 +134,11 @@ public static class CacheSerializer
             var cachedLevel = cacheData.GetLevel(level);
             
             // Write level number
-            BinarySerializationHelpers.WriteInt32LittleEndian(level, result, offset);
+            LittleEndianBitConverter.WriteInt32LittleEndian(level, result, offset);
             offset += 4;
 
             // Write node count
-            BinarySerializationHelpers.WriteInt64LittleEndian(cachedLevel.NodeCount, result, offset);
+            LittleEndianBitConverter.WriteInt64LittleEndian(cachedLevel.NodeCount, result, offset);
             offset += 8;
 
             // Write all nodes
@@ -189,13 +189,13 @@ public static class CacheSerializer
             throw new ArgumentException("Data is too short to contain header fields.", nameof(data));
 
         // Read tree height
-        int treeHeight = BinarySerializationHelpers.ReadInt32LittleEndian(data, offset);
+        int treeHeight = LittleEndianBitConverter.ReadInt32LittleEndian(data, offset);
         offset += 4;
         if (treeHeight < 0)
             throw new ArgumentException($"Invalid tree height: {treeHeight}. Must be non-negative.", nameof(data));
 
         // Read hash function name length
-        int hashFunctionNameLength = BinarySerializationHelpers.ReadInt32LittleEndian(data, offset);
+        int hashFunctionNameLength = LittleEndianBitConverter.ReadInt32LittleEndian(data, offset);
         offset += 4;
         if (hashFunctionNameLength < 0 || hashFunctionNameLength > 1024)
             throw new ArgumentException($"Invalid hash function name length: {hashFunctionNameLength}. Must be between 0 and 1024.", nameof(data));
@@ -213,25 +213,25 @@ public static class CacheSerializer
             throw new ArgumentException("Data is too short to contain remaining header fields.", nameof(data));
 
         // Read hash size
-        int hashSizeInBytes = BinarySerializationHelpers.ReadInt32LittleEndian(data, offset);
+        int hashSizeInBytes = LittleEndianBitConverter.ReadInt32LittleEndian(data, offset);
         offset += 4;
         if (hashSizeInBytes <= 0)
             throw new ArgumentException($"Invalid hash size: {hashSizeInBytes}. Must be positive.", nameof(data));
 
         // Read start level
-        int startLevel = BinarySerializationHelpers.ReadInt32LittleEndian(data, offset);
+        int startLevel = LittleEndianBitConverter.ReadInt32LittleEndian(data, offset);
         offset += 4;
         if (startLevel < 0)
             throw new ArgumentException($"Invalid start level: {startLevel}. Must be non-negative.", nameof(data));
 
         // Read end level
-        int endLevel = BinarySerializationHelpers.ReadInt32LittleEndian(data, offset);
+        int endLevel = LittleEndianBitConverter.ReadInt32LittleEndian(data, offset);
         offset += 4;
         if (endLevel < startLevel)
             throw new ArgumentException($"Invalid end level: {endLevel}. Must be >= start level {startLevel}.", nameof(data));
 
         // Read number of levels
-        int numLevels = BinarySerializationHelpers.ReadInt32LittleEndian(data, offset);
+        int numLevels = LittleEndianBitConverter.ReadInt32LittleEndian(data, offset);
         offset += 4;
         int expectedNumLevels = endLevel - startLevel + 1;
         if (numLevels != expectedNumLevels)
@@ -249,7 +249,7 @@ public static class CacheSerializer
                 throw new ArgumentException($"Data is too short to contain level {i} header.", nameof(data));
 
             // Read level number
-            int levelNumber = BinarySerializationHelpers.ReadInt32LittleEndian(data, offset);
+            int levelNumber = LittleEndianBitConverter.ReadInt32LittleEndian(data, offset);
             offset += 4;
 
             // Validate level number is in expected range
@@ -257,7 +257,7 @@ public static class CacheSerializer
                 throw new ArgumentException($"Level number {levelNumber} is outside expected range [{startLevel}, {endLevel}].", nameof(data));
 
             // Read node count
-            long nodeCount = BinarySerializationHelpers.ReadInt64LittleEndian(data, offset);
+            long nodeCount = LittleEndianBitConverter.ReadInt64LittleEndian(data, offset);
             offset += 8;
             if (nodeCount < 0)
                 throw new ArgumentException($"Invalid node count for level {levelNumber}: {nodeCount}. Must be non-negative.", nameof(data));
