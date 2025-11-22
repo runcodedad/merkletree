@@ -20,32 +20,32 @@ case "${1:-all}" in
     
   tree)
     echo "Running tree building benchmarks..."
-    dotnet run -c Release -- --filter *TreeBuilding*
+    dotnet run -c Release -- --filter '*TreeBuilding*'
     ;;
     
   proof)
     echo "Running proof generation and verification benchmarks..."
-    dotnet run -c Release -- --filter *Proof*
+    dotnet run -c Release -- --filter '*Proof*'
     ;;
     
   cache)
     echo "Running cache performance benchmarks..."
-    dotnet run -c Release -- --filter *Cache*
+    dotnet run -c Release -- --filter '*Cache*'
     ;;
     
   serialize)
     echo "Running serialization benchmarks..."
-    dotnet run -c Release -- --filter *Serialization*
+    dotnet run -c Release -- --filter '*Serialization*'
     ;;
     
   fast)
     echo "Running fast benchmarks only (small datasets)..."
-    dotnet run -c Release -- --filter *Small*
+    dotnet run -c Release -- --filter '*Small*'
     ;;
     
   streaming)
     echo "Running streaming tree benchmarks..."
-    dotnet run -c Release -- --filter *Streaming*
+    dotnet run -c Release -- --filter '*Streaming*'
     ;;
     
   memory)
