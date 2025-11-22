@@ -9,7 +9,7 @@
 
     <!-- NuGet Package Metadata -->
     <PackageId>MerkleTree</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.0.0-beta.1</Version>
     <Authors>runcodedad</Authors>
     <Description>A high-performance .NET library for creating and managing Merkle trees, providing cryptographic data structure support for data integrity verification and efficient data validation.</Description>
     <PackageTags>merkle;merkle-tree;cryptography;hash;data-structure;blockchain;security;integrity;verification</PackageTags>
