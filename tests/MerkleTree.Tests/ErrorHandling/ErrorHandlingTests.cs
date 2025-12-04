@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text;
 using Xunit;
 using MerkleTree.Hashing;
@@ -80,7 +81,7 @@ public class ErrorHandlingTests
         int hashSizeOffset = 1 + 4 + 8 + 4 + 5;
         
         // Change the hash size to something unrealistic
-        BitConverter.GetBytes(16).CopyTo(serialized, hashSizeOffset); // Change from 32 to 16
+        BinaryPrimitives.WriteInt32LittleEndian(serialized.AsSpan(hashSizeOffset), 16); // Change from 32 to 16
 
         // Act & Assert - This will cause extra bytes detection since hash size doesn't match actual data
         var ex = Assert.Throws<ArgumentException>(() => MerkleProof.Deserialize(serialized));
@@ -182,9 +183,9 @@ public class ErrorHandlingTests
         // Arrange - Create data with negative leaf value length
         var data = new byte[30];
         data[0] = 1; // version
-        BitConverter.GetBytes(0).CopyTo(data, 1); // tree height = 0
-        BitConverter.GetBytes(0L).CopyTo(data, 5); // leaf index = 0
-        BitConverter.GetBytes(-1).CopyTo(data, 13); // negative leaf value length
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(1), 0); // tree height = 0
+        BinaryPrimitives.WriteInt64LittleEndian(data.AsSpan(5), 0L); // leaf index = 0
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(13), -1); // negative leaf value length
 
         // Act & Assert
         var ex = Assert.Throws<ArgumentException>(() => MerkleProof.Deserialize(data));
@@ -209,11 +210,11 @@ public class ErrorHandlingTests
         data[offset++] = 1;
         
         // Tree height
-        BitConverter.GetBytes(2).CopyTo(data, offset);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(offset), 2);
         offset += 4;
         
         // Hash function name length
-        BitConverter.GetBytes(6).CopyTo(data, offset);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(offset), 6);
         offset += 4;
         
         // Hash function name
@@ -221,7 +222,7 @@ public class ErrorHandlingTests
         offset += 6;
         
         // Hash size (negative!)
-        BitConverter.GetBytes(-32).CopyTo(data, offset);
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(offset), -32);
 
         // Act & Assert
         var ex = Assert.Throws<ArgumentException>(() => CacheSerializer.Deserialize(data));
@@ -265,8 +266,8 @@ public class ErrorHandlingTests
         // Arrange - Create data with negative leaf index
         var data = new byte[30];
         data[0] = 1; // version
-        BitConverter.GetBytes(0).CopyTo(data, 1); // tree height = 0
-        BitConverter.GetBytes(-5L).CopyTo(data, 5); // negative leaf index
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(1), 0); // tree height = 0
+        BinaryPrimitives.WriteInt64LittleEndian(data.AsSpan(5), -5L); // negative leaf index
 
         // Act & Assert
         var ex = Assert.Throws<ArgumentException>(() => MerkleProof.Deserialize(data));
@@ -298,9 +299,9 @@ public class ErrorHandlingTests
         // Arrange - Create data with truncated leaf value
         var data = new byte[20];
         data[0] = 1; // version
-        BitConverter.GetBytes(0).CopyTo(data, 1); // tree height = 0
-        BitConverter.GetBytes(0L).CopyTo(data, 5); // leaf index = 0
-        BitConverter.GetBytes(100).CopyTo(data, 13); // leaf value length = 100 (but data is too short)
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(1), 0); // tree height = 0
+        BinaryPrimitives.WriteInt64LittleEndian(data.AsSpan(5), 0L); // leaf index = 0
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(13), 100); // leaf value length = 100 (but data is too short)
 
         // Act & Assert
         var ex = Assert.Throws<ArgumentException>(() => MerkleProof.Deserialize(data));

@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text;
 using Xunit;
 using MerkleTree.Hashing;
@@ -199,7 +200,7 @@ public class MerkleProofSerializationTests
 
         // Assert - Extract hash size from serialized data
         int hashSizeOffset = 1 + 4 + 8 + 4 + 5; // After version, height, index, leaf value length, and leaf value
-        int hashSize = BitConverter.ToInt32(serialized, hashSizeOffset);
+        int hashSize = BinaryPrimitives.ReadInt32LittleEndian(serialized.AsSpan(hashSizeOffset));
         Assert.Equal(32, hashSize); // SHA-256 produces 32 bytes
     }
 
@@ -216,7 +217,7 @@ public class MerkleProofSerializationTests
 
         // Assert - Extract hash size from serialized data
         int hashSizeOffset = 1 + 4 + 8 + 4 + 5;
-        int hashSize = BitConverter.ToInt32(serialized, hashSizeOffset);
+        int hashSize = BinaryPrimitives.ReadInt32LittleEndian(serialized.AsSpan(hashSizeOffset));
         Assert.Equal(64, hashSize); // SHA-512 produces 64 bytes
     }
 
@@ -233,7 +234,7 @@ public class MerkleProofSerializationTests
 
         // Assert - Extract hash size from serialized data
         int hashSizeOffset = 1 + 4 + 8 + 4 + 5;
-        int hashSize = BitConverter.ToInt32(serialized, hashSizeOffset);
+        int hashSize = BinaryPrimitives.ReadInt32LittleEndian(serialized.AsSpan(hashSizeOffset));
         Assert.Equal(32, hashSize); // BLAKE3 produces 32 bytes
     }
 
@@ -305,7 +306,7 @@ public class MerkleProofSerializationTests
         // Arrange - Manually create data with negative tree height
         var data = new byte[30];
         data[0] = 1; // version
-        BitConverter.GetBytes(-1).CopyTo(data, 1); // negative tree height
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(1), -1); // negative tree height
 
         // Act & Assert
         var ex = Assert.Throws<ArgumentException>(() => MerkleProof.Deserialize(data));
@@ -319,8 +320,8 @@ public class MerkleProofSerializationTests
         // Arrange - Manually create data with negative leaf index
         var data = new byte[30];
         data[0] = 1; // version
-        BitConverter.GetBytes(0).CopyTo(data, 1); // tree height = 0
-        BitConverter.GetBytes((long)-1).CopyTo(data, 5); // negative leaf index
+        BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(1), 0); // tree height = 0
+        BinaryPrimitives.WriteInt64LittleEndian(data.AsSpan(5), -1L); // negative leaf index
 
         // Act & Assert
         var ex = Assert.Throws<ArgumentException>(() => MerkleProof.Deserialize(data));
@@ -459,15 +460,15 @@ public class MerkleProofSerializationTests
         Assert.Equal(1, serialized[0]);
         
         // Tree height should be 1 (little-endian)
-        int treeHeight = BitConverter.ToInt32(serialized, 1);
+        int treeHeight = BinaryPrimitives.ReadInt32LittleEndian(serialized.AsSpan(1));
         Assert.Equal(1, treeHeight);
         
         // Leaf index should be 0 (little-endian)
-        long leafIndex = BitConverter.ToInt64(serialized, 5);
+        long leafIndex = BinaryPrimitives.ReadInt64LittleEndian(serialized.AsSpan(5));
         Assert.Equal(0, leafIndex);
         
         // Leaf value length should be 5 (little-endian)
-        int leafValueLength = BitConverter.ToInt32(serialized, 13);
+        int leafValueLength = BinaryPrimitives.ReadInt32LittleEndian(serialized.AsSpan(13));
         Assert.Equal(5, leafValueLength);
     }
 

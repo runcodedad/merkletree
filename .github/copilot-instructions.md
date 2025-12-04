@@ -1,208 +1,112 @@
-# MerkleTree Copilot Instructions
+# Copilot Instructions (concise)
 
-This file provides coding guidelines and context for GitHub Copilot when working on the MerkleTree library.
+Purpose: short, direct guidelines for contributors and Copilot suggestions.
 
-## Project Overview
+## Project layout
+- Single `MerkleTree` project with logical organization: `Core/`, `Hashing/`, `Proofs/`, `Cache/`, `Serialization/`.
 
-MerkleTree is a high-performance .NET library for creating and managing Merkle trees with cryptographic data structure support for data integrity verification. The library targets both .NET 10.0 and .NET Standard 2.1 for broad compatibility.
+## XML Documentation
+- Always document all public APIs with `<summary>`, `<param>`, `<returns>`, `<exception>`
+- Always include usage examples for complex APIs with `<example>` and `<code>`
 
-## Code Style and Standards
+## Markdown Documentation
+- Keep main `README.md` as a general overview and directory to specific docs
+- Never include implementation specifics in main `README.md`
+- Always create project-specific `README.md` for each `MerkleTree.*` project in `src/`
+- Always include architecture, usage examples, and API documentation in project READMEs
+- Never create READMEs for test projects (`*.Tests`)
+- Always place non-project-specific documentation in `docs/` folder
+- Use clear, concise language with code examples where appropriate
 
-### General Guidelines
+## Required Coding Patterns
 
-- Use C# 10+ features and modern .NET idioms
-- Enable nullable reference types throughout the codebase
-- Use implicit usings where appropriate
-- Prefer explicit types for clarity in public APIs
-- Use `var` for local variables when the type is obvious
-- Follow PascalCase for public members and camelCase for private fields
+### Naming
+- Use PascalCase for classes, methods, properties
+- Use _camelCase for private fields
+- Use interfaces starting with `I` (e.g., `IHashFunction`)
 
-### Documentation
+### Nullable Types
+- Always enable nullable reference types: `<Nullable>enable</Nullable>`
+- Use `ArgumentNullException.ThrowIfNull(parameter)` for null checks
+- Never use `!` null-forgiving operator
 
-- Always include XML documentation comments for:
-  - All public types, methods, properties, and parameters
-  - Complex internal logic that benefits from explanation
-- Use `<summary>`, `<param>`, `<returns>`, `<exception>`, and `<remarks>` tags appropriately
-- Document exceptions that may be thrown with `<exception>` tags
-- Include code examples in `<example>` tags for complex APIs
+### Async/Await
+- Always use async for I/O operations (file, network, database)
+- Always suffix async methods with `Async`
+- Always return `Task` or `Task<T>`
+- Always accept `CancellationToken` as last parameter with default value
+- Always check `cancellationToken.ThrowIfCancellationRequested()` in loops
 
-### Naming Conventions
+### Dependency Injection
+- Always use constructor injection
+- Always inject interfaces, never concrete classes
+- Always validate dependencies in constructor with `ArgumentNullException.ThrowIfNull`
 
-- Use PascalCase for classes, interfaces, methods, properties, and public fields
-- Use camelCase for local variables and private fields
-- Prefix interface names with 'I' (e.g., `IHashFunction`)
-- Use descriptive names that clearly convey intent
-- Avoid abbreviations unless they are well-known (e.g., SHA, UTF)
+### Immutability
+- Always use `readonly` fields
+- Always use records for data classes
+- Always use `ReadOnlyMemory<byte>` for binary data (keys, seeds)
+- Always use `ReadOnlySpan<T>` or `IReadOnlyList<T>` for exposing collections
 
 ### Error Handling
+- Always use specific exceptions: `ArgumentNullException`, `ArgumentException`, `InvalidOperationException`, `IOException`
+- Always validate input early
+- Never throw generic `Exception`
+- Never catch exceptions you can't handle
 
-- Validate all public method inputs and throw appropriate exceptions:
-  - `ArgumentNullException` for null arguments
-  - `ArgumentException` for invalid arguments
-  - `ArgumentOutOfRangeException` for out-of-range values
-  - `InvalidOperationException` for invalid state
-- Include descriptive error messages that help users understand the problem
-- Use `nameof()` for parameter names in exception messages
+## Testing
+- Use xUnit, NSubstitute for mocking, and place tests under `tests/MerkleTree.Tests/`
+- Always follow Arrange-Act-Assert pattern
+- Always name tests: `MethodName_Scenario_ExpectedBehavior`
+- Always clean up resources (files, streams) with `try/finally` or `using`
+- Always target 90%+ code coverage for business logic
+- Always mock interfaces only, never concrete classes
 
-## Project Structure
+## Security Requirements
+- Always validate all external inputs before processing
+- Always check size limits, value ranges, format correctness
+- Never log private keys, passwords, or sensitive data
+- Never expose stack traces to external clients
+- Never store private keys in plain text
+- Always encrypt private keys with user passphrase
+- Always copy byte arrays for sensitive data to prevent external modification
 
-### Namespaces
+## Forbidden Patterns
+- Never use blocking I/O: `File.ReadAllBytes`, `stream.Read` without async
+- Never use `.Result` or `.Wait()` on async operations
+- Never access file system directly without abstraction (use `IFileSystem`)
+- Never hardcode configuration values (use config classes with `init` properties)
+- Never use mutable static state
+- Never use `async void` (except event handlers)
+- Never ignore `CancellationToken` parameters
+- Never optimize prematurely (profile first)
 
-- `MerkleTree.Core` - Core tree implementation (MerkleTree, MerkleTreeNode, MerkleTreeStream, MerkleTreeMetadata)
-- `MerkleTree.Hashing` - Hash function abstractions and implementations (SHA-256, SHA-512, BLAKE3)
-- `MerkleTree.Proofs` - Merkle proof generation, verification, and serialization
-- `MerkleTree.Cache` - Caching support for streaming tree operations
+## Required Architecture
+- Use Factory pattern for complex object creation
+- Use Repository pattern with interfaces for storage
+- Use Observer pattern for event notifications
+- Use Disposable pattern (`IAsyncDisposable`) for file handles and network connections
 
-### Key Design Patterns
+## Multi-targeting
+- Target NET10_0 and NETStandard2.1; use `#if NET10_0` for platform-specific code.
 
-- **Binary tree structure**: Leaves at Level 0, parent nodes computed as Hash(left || right)
-- **Domain-separated padding**: For odd leaf counts, unpaired nodes become left children with padding as Hash("MERKLE_PADDING" || node_hash) on the right
-- **Streaming support**: Use `IEnumerable<byte[]>` and `IAsyncEnumerable<byte[]>` for large datasets
-- **Deterministic behavior**: Same input always produces same tree structure and root hash
+## Merkle Tree Specific Rules
 
-## Testing Guidelines
+### Hash algorithms
+- Default to SHA-256. Support SHA-512. BLAKE3 is available only for NET10_0 builds.
 
-### Test Framework
+### Performance
+- Use streaming APIs for large datasets (`MerkleTreeStream`). Cache top levels when generating many proofs.
 
-- Use xUnit for all tests
-- Place tests in `tests/MerkleTree.Tests/` mirroring the source structure
-- Use xUnit's `[Fact]` attribute for tests without parameters
-- Use `[Theory]` with `[InlineData]` for parameterized tests
+### Binary Data
+- Always use binary serialization for plots, proofs, blocks
+- Always use `BinaryWriter`/`BinaryReader` for simple structures
+- Always specify little-endian explicitly
+- Always version serialization formats
 
-### Test Structure
-
-- Follow Arrange-Act-Assert pattern
-- Use descriptive test method names: `MethodName_Scenario_ExpectedBehavior`
-- Include XML documentation comments explaining what each test verifies
-- Create helper methods for common test data setup (e.g., `CreateLeafData()`)
-- Test edge cases: null inputs, empty collections, single items, odd/even counts
-
-### Test Coverage
-
-- Write tests for all public APIs
-- Cover both success and failure paths
-- Test boundary conditions and edge cases
-- Verify exception throwing with `Assert.Throws<TException>()`
-- Test async methods with proper async/await patterns
-
-## Hash Functions
-
-### Supported Algorithms
-
-- **SHA-256** (default): 32-byte output, widely supported
-- **SHA-512**: 64-byte output, higher security
-- **BLAKE3**: 32-byte output, high performance (only on .NET 10.0)
-
-### Usage
-
-- Default to SHA-256 unless specified otherwise
-- Accept `IHashFunction` in constructors for algorithm flexibility
-- Hash function choice affects serialization output size
-- BLAKE3 is only available in .NET 10.0 target due to package dependencies
-
-## Performance Considerations
-
-### Memory Efficiency
-
-- Use streaming APIs (`MerkleTreeStream`) for large datasets that exceed available RAM
-- Process data incrementally with `IEnumerable<byte[]>` or `IAsyncEnumerable<byte[]>`
-- Use caching strategically for repeated proof generation on large trees
-- Configure batch sizes appropriately for memory constraints
-
-### Streaming Best Practices
-
-- Use `MerkleTree` class for in-memory datasets that fit in RAM
-- Use `MerkleTreeStream` class for datasets larger than available memory
-- Enable caching when generating multiple proofs from the same large tree
-- Cache top N levels (default 5) to balance memory usage and performance
-
-## Common Patterns
-
-### Creating a Merkle Tree
-
-```csharp
-// In-memory tree
-var leafData = new List<byte[]> { data1, data2, data3 };
-var tree = new MerkleTree(leafData);
-byte[] rootHash = tree.GetRootHash();
-
-// Streaming tree
-var stream = new MerkleTreeStream();
-var metadata = stream.Build(largeDataset);
-```
-
-### Generating and Verifying Proofs
-
-```csharp
-// Generate proof
-var proof = tree.GenerateProof(leafIndex);
-
-// Verify proof
-var hashFunction = new Sha256HashFunction();
-bool isValid = proof.Verify(rootHash, hashFunction);
-```
-
-### Using Cache for Streaming
-
-```csharp
-// Build with cache
-var cacheConfig = new CacheConfiguration("merkle.cache", topLevelsToCache: 5);
-var metadata = await stream.BuildAsync(leafData, cacheConfig);
-
-// Load and use cache
-var cache = CacheFileManager.LoadCache("merkle.cache");
-var proof = await stream.GenerateProofAsync(leafData, leafIndex, leafCount, cache);
-```
-
-## Security Guidelines
-
-- Never expose raw cryptographic operations without proper abstraction
-- Validate all inputs before cryptographic operations
-- Use defensive copying for byte arrays to prevent external modification
-- Clear sensitive data from memory when no longer needed
-- Follow secure coding practices for cryptographic implementations
-
-## Build and Test Commands
-
-```bash
-# Restore dependencies
-dotnet restore
-
-# Build the solution
-dotnet build --configuration Release
-
-# Run all tests
-dotnet test --configuration Release --verbosity normal
-
-# Run tests with coverage
-dotnet test --collect:"XPlat Code Coverage"
-
-# Create NuGet package
-dotnet pack -c Release
-```
-
-## Prohibited Patterns
-
-- Do not use deprecated .NET APIs
-- Do not expose mutable collections in public APIs - return read-only collections or copies
-- Do not modify input byte arrays - always work with copies
-- Do not use blocking calls in async methods - use async/await throughout
-- Do not catch and swallow exceptions without proper logging or re-throwing
-- Do not use `Task.Result` or `Task.Wait()` - use async/await instead
-
-## Multi-Targeting Considerations
-
-- Code targets both .NET 10.0 and .NET Standard 2.1
-- Use conditional compilation (`#if NET10_0`) for .NET 10.0-specific features
-- BLAKE3 hash function is only available in .NET 10.0 target
-- Ensure all features work on both target frameworks unless explicitly documented
-- Test both target frameworks before releasing changes
-
-## Additional Context
-
-- The library emphasizes deterministic behavior for reproducibility
-- Proof serialization format is platform-independent and version-safe
-- Tree structure uses left-to-right leaf ordering
-- Padding strategy is domain-separated to prevent collision attacks
-- All operations are thread-safe for read-only access
-- Write operations should be externally synchronized
+### Byte Order (Endianness)
+- Always use `BinaryPrimitives` from `System.Buffers.Binary` for reading/writing numeric types
+- Always specify little-endian explicitly: `WriteInt64LittleEndian`, `ReadInt32LittleEndian`, etc.
+- Never use `BitConverter` (platform-dependent endianness)
+- Always ensure cross-platform compatibility for binary formats (plots, blocks, network messages)
+- Always use little-endian for all serialized numeric data

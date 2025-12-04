@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text;
 using Xunit;
 using MerkleTree.Core;
@@ -62,7 +63,9 @@ public class LargeTreeTests
             for (int i = 0; i < count; i++)
             {
                 // Use shorter data to keep memory low
-                yield return BitConverter.GetBytes(i);
+                var data = new byte[4];
+                BinaryPrimitives.WriteInt32LittleEndian(data, i);
+                yield return data;
                 if (i % 100 == 0)
                     await Task.Yield(); // Periodically yield to simulate async
             }
@@ -86,11 +89,14 @@ public class LargeTreeTests
         {
             for (int i = 0; i < count; i++)
             {
-                yield return BitConverter.GetBytes(i);
-                if (i % 100 == 0)
+                var data = new byte[4];
+                BinaryPrimitives.WriteInt32LittleEndian(data, i);
+                yield return data;
+                if (i % 50 == 0)
                     await Task.Yield();
             }
         }
+
 
         var tempFile = Path.Combine(Path.GetTempPath(), $"large_tree_{Guid.NewGuid():N}.cache");
 
@@ -126,7 +132,9 @@ public class LargeTreeTests
         {
             for (int i = 0; i < count; i++)
             {
-                yield return BitConverter.GetBytes(i);
+                var data = new byte[4];
+                BinaryPrimitives.WriteInt32LittleEndian(data, i);
+                yield return data;
                 if (i % 100 == 0)
                     await Task.Yield();
             }
@@ -158,7 +166,9 @@ public class LargeTreeTests
         {
             for (int i = 0; i < count; i++)
             {
-                yield return BitConverter.GetBytes(i);
+                var data = new byte[4];
+                BinaryPrimitives.WriteInt32LittleEndian(data, i);
+                yield return data;
                 if (i % 100 == 0)
                     await Task.Yield();
             }
