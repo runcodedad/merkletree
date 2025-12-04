@@ -97,7 +97,6 @@ public class LargeTreeTests
             }
         }
 
-        var tempFile1 = Path.Combine(Path.GetTempPath(), $"tree1_{Guid.NewGuid():N}.cache");
 
         var tempFile = Path.Combine(Path.GetTempPath(), $"large_tree_{Guid.NewGuid():N}.cache");
 
