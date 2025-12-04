@@ -173,12 +173,12 @@ var isValid = proof.Verify(trustedRootHash, new Sha256HashFunction());
 
 ### Platform Independence
 
-- Uses little-endian byte order (standard for .NET BitConverter)
+- Uses little-endian byte order via `BinaryPrimitives` for guaranteed cross-platform consistency
 - No alignment padding or structure packing
 - No pointer-dependent data
 - Works across:
   - Windows, Linux, macOS
-  - x86, x64, ARM architectures
+  - x86, x64, ARM, and big-endian architectures
   - .NET Framework, .NET Core, .NET 5+
 
 ### Validation
@@ -335,9 +335,11 @@ for (int i = 0; i < treeHeight; i++)
 
 ### Endianness
 
-All multi-byte integers use little-endian byte order (native to x86/x64):
-- `BitConverter.GetBytes()` for serialization
-- `BitConverter.ToInt32()`, `BitConverter.ToInt64()` for deserialization
+All multi-byte integers use little-endian byte order for cross-platform consistency:
+- `BinaryPrimitives.WriteInt32LittleEndian()`, `BinaryPrimitives.WriteInt64LittleEndian()` for serialization
+- `BinaryPrimitives.ReadInt32LittleEndian()`, `BinaryPrimitives.ReadInt64LittleEndian()` for deserialization
+
+This ensures that serialized proofs are identical across all platforms (x86, x64, ARM, big-endian systems, etc.), regardless of the native endianness of the system.
 
 ## See Also
 

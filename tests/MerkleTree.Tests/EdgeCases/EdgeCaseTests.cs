@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text;
 using Xunit;
 using MerkleTree.Core;
@@ -219,7 +220,9 @@ public class EdgeCaseTests
                     cts.Cancel(); // Cancel mid-stream
                     
                 await Task.Yield();
-                yield return BitConverter.GetBytes(i);
+                var data = new byte[4];
+                BinaryPrimitives.WriteInt32LittleEndian(data, i);
+                yield return data;
             }
         }
 
@@ -326,7 +329,9 @@ public class EdgeCaseTests
             for (int i = 0; i < count; i++)
             {
                 await Task.Yield();
-                yield return BitConverter.GetBytes(i);
+                var data = new byte[4];
+                BinaryPrimitives.WriteInt32LittleEndian(data, i);
+                yield return data;
             }
         }
 
@@ -370,7 +375,9 @@ public class EdgeCaseTests
             for (int i = 0; i < 10; i++)
             {
                 await Task.Yield();
-                yield return BitConverter.GetBytes(i);
+                var data = new byte[4];
+                BinaryPrimitives.WriteInt32LittleEndian(data, i);
+                yield return data;
             }
         }
 
@@ -463,7 +470,11 @@ public class EdgeCaseTests
     {
         // Arrange - Create a tree with maximum practical height
         var leafData = Enumerable.Range(0, 500)
-            .Select(i => BitConverter.GetBytes(i))
+            .Select(i => {
+                var data = new byte[4];
+                BinaryPrimitives.WriteInt32LittleEndian(data, i);
+                return data;
+            })
             .ToList();
         var tree = new MerkleTreeClass(leafData);
         var proof = tree.GenerateProof(250);

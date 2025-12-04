@@ -1,5 +1,5 @@
+using System.Buffers.Binary;
 using System.Text;
-using MerkleTree.Serialization;
 
 namespace MerkleTree.Cache;
 
@@ -102,30 +102,30 @@ public static class CacheSerializer
         result[offset++] = FormatVersion;
 
         // Write tree height
-        LittleEndianBitConverter.WriteInt32(metadata.TreeHeight, result, offset);
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), metadata.TreeHeight);
         offset += 4;
 
         // Write hash function name length and data
-        LittleEndianBitConverter.WriteInt32(hashFunctionNameBytes.Length, result, offset);
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), hashFunctionNameBytes.Length);
         offset += 4;
         hashFunctionNameBytes.CopyTo(result, offset);
         offset += hashFunctionNameBytes.Length;
 
         // Write hash size
-        LittleEndianBitConverter.WriteInt32(metadata.HashSizeInBytes, result, offset);
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), metadata.HashSizeInBytes);
         offset += 4;
 
         // Write start level
-        LittleEndianBitConverter.WriteInt32(metadata.StartLevel, result, offset);
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), metadata.StartLevel);
         offset += 4;
 
         // Write end level
-        LittleEndianBitConverter.WriteInt32(metadata.EndLevel, result, offset);
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), metadata.EndLevel);
         offset += 4;
 
         // Write number of levels
         int numLevels = metadata.EndLevel - metadata.StartLevel + 1;
-        LittleEndianBitConverter.WriteInt32(numLevels, result, offset);
+        BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), numLevels);
         offset += 4;
 
         // Write level data
@@ -134,11 +134,11 @@ public static class CacheSerializer
             var cachedLevel = cacheData.GetLevel(level);
             
             // Write level number
-            LittleEndianBitConverter.WriteInt32(level, result, offset);
+            BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), level);
             offset += 4;
 
             // Write node count
-            LittleEndianBitConverter.WriteInt64(cachedLevel.NodeCount, result, offset);
+            BinaryPrimitives.WriteInt64LittleEndian(result.AsSpan(offset), cachedLevel.NodeCount);
             offset += 8;
 
             // Write all nodes
@@ -189,13 +189,13 @@ public static class CacheSerializer
             throw new ArgumentException("Data is too short to contain header fields.", nameof(data));
 
         // Read tree height
-        int treeHeight = LittleEndianBitConverter.ReadInt32(data, offset);
+        int treeHeight = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset));
         offset += 4;
         if (treeHeight < 0)
             throw new ArgumentException($"Invalid tree height: {treeHeight}. Must be non-negative.", nameof(data));
 
         // Read hash function name length
-        int hashFunctionNameLength = LittleEndianBitConverter.ReadInt32(data, offset);
+        int hashFunctionNameLength = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset));
         offset += 4;
         if (hashFunctionNameLength < 0 || hashFunctionNameLength > 1024)
             throw new ArgumentException($"Invalid hash function name length: {hashFunctionNameLength}. Must be between 0 and 1024.", nameof(data));
@@ -213,25 +213,25 @@ public static class CacheSerializer
             throw new ArgumentException("Data is too short to contain remaining header fields.", nameof(data));
 
         // Read hash size
-        int hashSizeInBytes = LittleEndianBitConverter.ReadInt32(data, offset);
+        int hashSizeInBytes = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset));
         offset += 4;
         if (hashSizeInBytes <= 0)
             throw new ArgumentException($"Invalid hash size: {hashSizeInBytes}. Must be positive.", nameof(data));
 
         // Read start level
-        int startLevel = LittleEndianBitConverter.ReadInt32(data, offset);
+        int startLevel = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset));
         offset += 4;
         if (startLevel < 0)
             throw new ArgumentException($"Invalid start level: {startLevel}. Must be non-negative.", nameof(data));
 
         // Read end level
-        int endLevel = LittleEndianBitConverter.ReadInt32(data, offset);
+        int endLevel = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset));
         offset += 4;
         if (endLevel < startLevel)
             throw new ArgumentException($"Invalid end level: {endLevel}. Must be >= start level {startLevel}.", nameof(data));
 
         // Read number of levels
-        int numLevels = LittleEndianBitConverter.ReadInt32(data, offset);
+        int numLevels = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset));
         offset += 4;
         int expectedNumLevels = endLevel - startLevel + 1;
         if (numLevels != expectedNumLevels)
@@ -249,7 +249,7 @@ public static class CacheSerializer
                 throw new ArgumentException($"Data is too short to contain level {i} header.", nameof(data));
 
             // Read level number
-            int levelNumber = LittleEndianBitConverter.ReadInt32(data, offset);
+            int levelNumber = BinaryPrimitives.ReadInt32LittleEndian(data.AsSpan(offset));
             offset += 4;
 
             // Validate level number is in expected range
@@ -257,7 +257,7 @@ public static class CacheSerializer
                 throw new ArgumentException($"Level number {levelNumber} is outside expected range [{startLevel}, {endLevel}].", nameof(data));
 
             // Read node count
-            long nodeCount = LittleEndianBitConverter.ReadInt64(data, offset);
+            long nodeCount = BinaryPrimitives.ReadInt64LittleEndian(data.AsSpan(offset));
             offset += 8;
             if (nodeCount < 0)
                 throw new ArgumentException($"Invalid node count for level {levelNumber}: {nodeCount}. Must be non-negative.", nameof(data));

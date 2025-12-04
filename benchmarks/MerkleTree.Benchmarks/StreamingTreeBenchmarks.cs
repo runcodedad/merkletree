@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
 using MerkleTree.Core;
@@ -17,7 +18,9 @@ public class StreamingTreeBenchmarks
     {
         for (int i = 0; i < count; i++)
         {
-            yield return BitConverter.GetBytes(i);
+            var data = new byte[4];
+            BinaryPrimitives.WriteInt32LittleEndian(data, i);
+            yield return data;
             if (i % 100 == 0)
                 await Task.Yield();
         }
