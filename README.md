@@ -2,6 +2,9 @@
 
 A high-performance .NET library for creating and managing Merkle trees, providing cryptographic data structure support for data integrity verification and efficient data validation.
 
+[![NuGet Version (stable)](https://img.shields.io/nuget/v/MerkleTree.svg)](https://www.nuget.org/packages/MerkleTree/)
+[![NuGet Version (includes prereleases)](https://img.shields.io/nuget/vpre/MerkleTree.svg)](https://www.nuget.org/packages/MerkleTree/)
+
 ## Overview
 
 Merkle trees (also known as hash trees) are a fundamental cryptographic data structure used in various applications including:
