@@ -28,6 +28,11 @@ public class DomainSeparationTests
     {
         // This test verifies that no leaf data can produce the same hash as an internal node
         // by ensuring domain separation (leaf uses 0x00 prefix, internal nodes use 0x01 prefix)
+        //
+        // NOTE: This test intentionally constructs domain-separated hashes manually rather than
+        // using MerkleTreeBase methods. This is a security test that verifies collision resistance
+        // by attempting to forge hashes. Using production methods would just test that the methods
+        // call themselves correctly, not that domain separation actually prevents attacks.
 
         // Arrange
         var hashFunction = new Sha256HashFunction();
@@ -235,6 +240,10 @@ public class DomainSeparationTests
     public void LeafHash_CannotForgeInternalNodeStructure()
     {
         // Advanced attack test: try to forge an internal node structure by crafting leaf data
+        //
+        // NOTE: This test intentionally constructs hashes manually to simulate an attacker
+        // attempting to forge tree structure. This validates the security properties of
+        // domain separation at a fundamental level.
         
         // Arrange
         var hashFunction = new Sha256HashFunction();

@@ -73,6 +73,7 @@ Console.WriteLine($"Root Hash: {Convert.ToHexString(rootHash)}");
 var metadata = tree.GetMetadata();
 Console.WriteLine($"Root Hash: {Convert.ToHexString(metadata.RootHash)}");
 Console.WriteLine($"Height: {metadata.Height}, Leaves: {metadata.LeafCount}");
+Console.WriteLine($"Hash Algorithm: {metadata.HashAlgorithmName}");
 
 // Use a different hash algorithm (default is SHA256)
 var treeSHA512 = new MerkleTree(leafData, new Sha512HashFunction());
@@ -112,17 +113,56 @@ var metadata = await builder.BuildAsync(asyncLeaves);
 Console.WriteLine($"Root Hash: {Convert.ToHexString(metadata.RootHash)}");
 ```
 
+### Hash Utilities
+
+For applications like Sparse Merkle Trees (SMT), the library provides utilities to derive bit paths from keys:
+
+```csharp
+using MerkleTree.Hashing;
+using System.Text;
+
+var hashFunction = new Sha256HashFunction();
+var key = Encoding.UTF8.GetBytes("my-key");
+
+// Hash the key
+var keyHash = hashFunction.ComputeHash(key);
+
+// Derive a bit path for tree traversal
+// Each bit determines left (false/0) or right (true/1) at each tree level
+var bitPath = HashUtils.GetBitPath(keyHash, 256); // All 256 bits
+var shortPath = HashUtils.GetBitPath(keyHash, 8);  // First 8 bits only
+
+// Use bit path for Sparse Merkle Tree navigation
+for (int i = 0; i < shortPath.Length; i++)
+{
+    Console.WriteLine($"Level {i}: Go {(shortPath[i] ? "right" : "left")}");
+}
+```
+
 ## Tree Structure and Design
 
-This implementation provides a **binary Merkle tree** with support for **non-power-of-two leaf counts** using a **domain-separated padding strategy**.
+This implementation provides a **binary Merkle tree** with support for **non-power-of-two leaf counts** using **domain-separated hashing** for enhanced security.
 
 ### Key Features
 
 #### Binary Tree Structure
 - **Leaves at Level 0**: Input data forms the bottom layer of the tree
-- **Parent nodes**: Computed as `Hash(left_child || right_child)`
+- **Parent nodes**: Computed using domain-separated hashing
 - **Left-to-right ordering**: Leaves are processed in the order provided
 - **Fully deterministic**: Same input always produces the same tree structure
+
+#### Domain-Separated Hashing
+
+To prevent collision attacks where an attacker could construct data that produces the same hash as an internal node, this implementation uses **domain separation** for all hash operations:
+
+- **Leaf hashes**: `Hash(0x00 || leaf_data)` — prefix byte 0x00 distinguishes leaves
+- **Internal node hashes**: `Hash(0x01 || left_hash || right_hash)` — prefix byte 0x01 distinguishes internal nodes
+- **Padding hashes**: `Hash("MERKLE_PADDING" || unpaired_hash)` — string prefix distinguishes padding
+
+This ensures:
+- ✅ **Collision resistance**: A leaf hash can never equal an internal node hash or padding hash
+- ✅ **Security**: Prevents second-preimage attacks where malicious data mimics tree structure
+- ✅ **Standards compliance**: Follows cryptographic best practices for Merkle tree construction
 
 #### Non-Power-of-Two Support
 
@@ -134,24 +174,30 @@ When the number of leaves (or nodes at any level) is odd, the tree uses a **doma
 
 This approach ensures:
 - ✅ **Deterministic behavior**: Same input always produces same tree
-- ✅ **Security**: Padding cannot be confused with legitimate data
+- ✅ **Security**: Padding cannot be confused with legitimate data or internal nodes
 - ✅ **Transparency**: Padding nodes are clearly distinguishable from data nodes
 
 **Example with 3 leaves:**
 ```
-Level 2:          Root
+Level 2:          Root = Hash(0x01 || H(L1||L2) || H(L3||Pad))
                  /    \
 Level 1:    H(L1||L2)  H(L3||Pad)
            /    \      /    \
 Level 0:  L1    L2    L3   Pad
 ```
 
-Where `Pad = Hash("MERKLE_PADDING" || L3)`
+Where:
+- `L1 = Hash(0x00 || data1)` — leaf with domain prefix
+- `L2 = Hash(0x00 || data2)` — leaf with domain prefix
+- `L3 = Hash(0x00 || data3)` — leaf with domain prefix
+- `Pad = Hash("MERKLE_PADDING" || L3)` — padding with string prefix
+- `H(L1||L2) = Hash(0x01 || L1 || L2)` — internal node with domain prefix
+- `H(L3||Pad) = Hash(0x01 || L3 || Pad)` — internal node with domain prefix
 
 #### Orientation Rules
 
 - **Leaf processing**: Left-to-right in the order provided in the input array
-- **Parent hash computation**: Always `Hash(left_child || right_child)`
+- **Parent hash computation**: Always `Hash(0x01 || left_hash || right_hash)` with domain separation
 - **Unpaired nodes**: Become the left child, with padding as the right child
 
 ## Streaming Support
@@ -476,9 +522,18 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Initial project setup
 - NuGet package configuration
 - Multi-targeting support (.NET 10.0 and .NET Standard 2.1)
+- **Hash algorithm abstraction and domain-separated hashing** (NEW)
+  - `IHashFunction` interface for pluggable hash algorithms
+  - SHA-256, SHA-512, and BLAKE3 implementations
+  - Domain-separated hashing primitives to prevent collision attacks:
+    - Leaf hashes: `Hash(0x00 || leaf_data)`
+    - Internal node hashes: `Hash(0x01 || left || right)`
+    - Padding hashes: `Hash("MERKLE_PADDING" || unpaired_hash)`
+  - Hash algorithm name exposed in `MerkleTreeMetadata`
+  - `HashUtils` utility class for bit-path derivation (for SMT support)
 - **Merkle tree implementation with non-power-of-two leaf support**
   - Binary tree structure with leaves at Level 0
-  - Domain-separated padding strategy for odd leaf counts
+  - Domain-separated hashing for all node types
   - Fully deterministic tree structure based on leaf ordering
   - Support for multiple hash algorithms (SHA-256, SHA-512, BLAKE3)
 - **Streaming Merkle tree builder**
@@ -517,7 +572,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
   - Cache lookup during proof generation avoids re-streaming data
   - Persistent cache files for reuse across sessions
   - Full integration with `MerkleTreeStream` API
-- Comprehensive test coverage (167+ tests)
+- Comprehensive test coverage (285+ tests including 26 new domain separation and hash utility tests)
 
 ## Performance Benchmarks
 
