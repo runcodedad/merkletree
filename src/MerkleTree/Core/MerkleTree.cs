@@ -106,8 +106,8 @@ public class MerkleTree : MerkleTreeBase
     /// <returns>A tuple containing the root node, the height of the tree, and the list of leaf nodes.</returns>
     private (MerkleTreeNode root, int height, List<MerkleTreeNode> leafNodes) BuildTree(List<byte[]> leafData)
     {
-        // Create leaf nodes at Level 0
-        var currentLevel = leafData.Select(data => new MerkleTreeNode(ComputeHash(data))).ToList();
+        // Create leaf nodes at Level 0 with domain-separated leaf hashing
+        var currentLevel = leafData.Select(data => new MerkleTreeNode(ComputeLeafHash(data))).ToList();
         var leafNodes = new List<MerkleTreeNode>(currentLevel);
 
         int height = 0;
@@ -186,10 +186,10 @@ public class MerkleTree : MerkleTreeBase
     /// <summary>
     /// Gets the metadata for this Merkle tree.
     /// </summary>
-    /// <returns>Metadata containing the root node, height, and leaf count.</returns>
+    /// <returns>Metadata containing the root node, height, leaf count, and hash algorithm name.</returns>
     public MerkleTreeMetadata GetMetadata()
     {
-        return new MerkleTreeMetadata(Root, Height, LeafCount);
+        return new MerkleTreeMetadata(Root, Height, LeafCount, _hashFunction.Name);
     }
 
     /// <summary>

@@ -154,7 +154,7 @@ public class MerkleTreeStreamTests
     public void Metadata_Constructor_WithNullRootHash_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new MerkleTreeMetadata(null!, 0, 1));
+        Assert.Throws<ArgumentNullException>(() => new MerkleTreeMetadata(null!, 0, 1, "SHA-256"));
     }
 
     [Fact]
@@ -167,7 +167,7 @@ public class MerkleTreeStreamTests
         var leafCount = 32L;
 
         // Act
-        var metadata = new MerkleTreeMetadata(rootNode, height, leafCount);
+        var metadata = new MerkleTreeMetadata(rootNode, height, leafCount, "SHA-256");
 
         // Assert
         Assert.Same(rootNode, metadata.Root);

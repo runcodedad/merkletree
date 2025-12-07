@@ -5,7 +5,7 @@ namespace MerkleTree.Core;
 /// </summary>
 /// <remarks>
 /// This class provides information about the tree structure including its height,
-/// the number of leaves, and the root node.
+/// the number of leaves, the root node, and the hash algorithm used.
 /// </remarks>
 public class MerkleTreeMetadata
 {
@@ -37,16 +37,29 @@ public class MerkleTreeMetadata
     public long LeafCount { get; }
 
     /// <summary>
+    /// Gets the name/identifier of the hash algorithm used to construct this tree.
+    /// </summary>
+    /// <remarks>
+    /// This identifier is used for format identification when serializing or deserializing
+    /// tree data, and helps ensure compatibility when verifying proofs or comparing trees.
+    /// Examples: "SHA-256", "SHA-512", "BLAKE3"
+    /// </remarks>
+    public string HashAlgorithmName { get; }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="MerkleTreeMetadata"/> class.
     /// </summary>
     /// <param name="root">The root node of the tree.</param>
     /// <param name="height">The height of the tree.</param>
     /// <param name="leafCount">The number of leaves in the tree.</param>
-    public MerkleTreeMetadata(MerkleTreeNode root, int height, long leafCount)
+    /// <param name="hashAlgorithmName">The name/identifier of the hash algorithm used.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="root"/> or <paramref name="hashAlgorithmName"/> is null.</exception>
+    public MerkleTreeMetadata(MerkleTreeNode root, int height, long leafCount, string hashAlgorithmName)
     {
         Root = root ?? throw new ArgumentNullException(nameof(root));
         Height = height;
         LeafCount = leafCount;
+        HashAlgorithmName = hashAlgorithmName ?? throw new ArgumentNullException(nameof(hashAlgorithmName));
     }
 
     /// <summary>

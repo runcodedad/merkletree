@@ -89,7 +89,8 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
             {
                 await foreach (var leaf in leafData.WithCancellation(cancellationToken))
                 {
-                    var hash = ComputeHash(leaf);
+                    // Use domain-separated leaf hashing
+                    var hash = ComputeLeafHash(leaf);
                     writer.Write(hash.Length);
                     writer.Write(hash);
                     leafCount++;
@@ -171,7 +172,7 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
             }
 
             var rootNode = new MerkleTreeNode(rootHash);
-            var metadata = new MerkleTreeMetadata(rootNode, height, leafCount);
+            var metadata = new MerkleTreeMetadata(rootNode, height, leafCount, _hashFunction.Name);
 
             // Build cache file if caching is enabled
             // The circular queue has already kept only the top N non-root levels we need
@@ -441,15 +442,15 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
                     if (targetLeaf == null)
                         throw new InvalidOperationException($"Could not find leaf at index {currentIndex}.");
 
-                    // Compute sibling hash
+                    // Compute sibling hash with domain separation
                     if (siblingIndex < levelSize && siblingLeaf != null)
                     {
-                        siblingHash = ComputeHash(siblingLeaf);
+                        siblingHash = ComputeLeafHash(siblingLeaf);
                     }
                     else
                     {
                         // No sibling - create padding hash
-                        var currentHash = ComputeHash(targetLeaf);
+                        var currentHash = ComputeLeafHash(targetLeaf);
                         siblingHash = CreatePaddingHash(currentHash);
                     }
                 }
@@ -637,7 +638,8 @@ public class MerkleTreeStream(IHashFunction hashFunction) : MerkleTreeBase(hashF
         {
             if (currentIndex >= startLeafIndex && currentIndex < endLeafIndex)
             {
-                var hash = ComputeHash(leaf);
+                // Use domain-separated leaf hashing
+                var hash = ComputeLeafHash(leaf);
                 leafHashes.Add(hash);
                 // Store in session cache
                 sessionCache[(0, startLeafIndex + leafHashes.Count - 1)] = hash;
