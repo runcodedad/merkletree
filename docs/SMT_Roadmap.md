@@ -22,11 +22,11 @@ This roadmap outlines a minimal, dependency-aware implementation path for the SM
 
 2. Interfaces & Model
    - Define persistence abstraction interfaces (read/write, batch, snapshots, metadata).
-     - Tracked in issue: #42
+     - Tracked in issue: #42 ✅ **COMPLETED** — See [SMT_PERSISTENCE.md](./SMT_PERSISTENCE.md)
    - Implement the SMT tree model (key → bit-path mapping, node types, depth config).
      - Tracked in issue: #38
    - Deliverables:
-     - Persistence interfaces (language-idiomatic)
+     - Persistence interfaces (language-idiomatic) ✅ **COMPLETED**
      - Tree model APIs and bit-path utilities
    - Why next: core operations and tests depend on these abstractions.
 
@@ -77,7 +77,7 @@ Adjust per team size and desired depth of test coverage.
 ## References
 - #39 — Hash abstraction & domain-separated hashing  
 - #43 — Metadata structure & zero-hash table ✅ **COMPLETED** — See [SMT_METADATA.md](./SMT_METADATA.md)
-- #42 — Persistence abstraction interfaces  
+- #42 — Persistence abstraction interfaces ✅ **COMPLETED** — See [SMT_PERSISTENCE.md](./SMT_PERSISTENCE.md)
 - #38 — Tree model & key → bit-path mapping  
 - #44 — Error handling model  
 - #41 — Proof generation & verification  
