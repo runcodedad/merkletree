@@ -1232,7 +1232,7 @@ This roadmap outlines the minimal, dependency-aware implementation path for the 
 #### 2. Interfaces & Model
 
 - Define persistence abstraction interfaces (read/write, batch, snapshots, metadata) (Issue #42) ✅ **COMPLETED**
-- Implement the SMT tree model (key → bit-path mapping, node types, depth config) (Issue #38)
+- Implement the SMT tree model (key → bit-path mapping, node types, depth config) (Issue #38) ✅ COMPLETED
 - **Deliverables:**
   - Persistence interfaces (language-idiomatic) ✅ **COMPLETED**
   - Tree model APIs and bit-path utilities
@@ -1240,7 +1240,7 @@ This roadmap outlines the minimal, dependency-aware implementation path for the 
 
 #### 3. Core Operations & Errors
 
-- Implement Get / Update / Delete and deterministic batch updates (return nodes-to-persist)
+- Implement Get / Update / Delete and deterministic batch updates (return nodes-to-persist) (Issue #40) 
 - Define a consistent error model for verification, depth mismatch, and adapter failures (Issue #44)
 - **Deliverables:**
   - Deterministic batch semantics (documented)
