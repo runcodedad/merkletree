@@ -254,8 +254,11 @@ public sealed class SmtMetadata
         string hashAlgorithmId = Encoding.UTF8.GetString(hashAlgBytes);
 
         // Read zero-hash table
-        var remainingBytes = new byte[ms.Length - ms.Position];
-        _ = reader.Read(remainingBytes, 0, remainingBytes.Length);
+        var remainingLength = (int)(ms.Length - ms.Position);
+        var remainingBytes = reader.ReadBytes(remainingLength);
+        if (remainingBytes.Length != remainingLength)
+            throw new ArgumentException("Unexpected end of stream while reading zero-hash table.", nameof(data));
+        
         var zeroHashes = ZeroHashTable.Deserialize(remainingBytes);
 
         return new SmtMetadata(hashAlgorithmId, treeDepth, zeroHashes, smtCoreVersion, serializationFormatVersion);

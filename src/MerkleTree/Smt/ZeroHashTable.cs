@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using MerkleTree.Core;
 using MerkleTree.Hashing;
 
 namespace MerkleTree.Smt;
@@ -44,21 +45,7 @@ namespace MerkleTree.Smt;
 /// </remarks>
 public sealed class ZeroHashTable
 {
-    /// <summary>
-    /// Domain separator byte for leaf node hashing (0x00).
-    /// </summary>
-    /// <remarks>
-    /// This must match the domain separator used in MerkleTreeBase for consistency.
-    /// </remarks>
-    private const byte LeafDomainSeparator = 0x00;
 
-    /// <summary>
-    /// Domain separator byte for internal node hashing (0x01).
-    /// </summary>
-    /// <remarks>
-    /// This must match the domain separator used in MerkleTreeBase for consistency.
-    /// </remarks>
-    private const byte InternalNodeDomainSeparator = 0x01;
 
     private readonly byte[][] _hashes;
 
@@ -194,7 +181,7 @@ public sealed class ZeroHashTable
 
         // Level 0: Hash of empty leaf with domain separator
         // Hash(0x00 || empty_array)
-        var emptyLeafData = new byte[1] { LeafDomainSeparator };
+        var emptyLeafData = new byte[1] { MerkleTreeBase.LeafDomainSeparator };
         hashes[0] = hashFunction.ComputeHash(emptyLeafData);
 
         // Levels 1 through depth: Hash of two child zero-hashes with domain separator
@@ -203,7 +190,7 @@ public sealed class ZeroHashTable
         {
             var childZeroHash = hashes[level - 1];
             var internalNodeData = new byte[1 + childZeroHash.Length * 2];
-            internalNodeData[0] = InternalNodeDomainSeparator;
+            internalNodeData[0] = MerkleTreeBase.InternalNodeDomainSeparator;
             Array.Copy(childZeroHash, 0, internalNodeData, 1, childZeroHash.Length);
             Array.Copy(childZeroHash, 0, internalNodeData, 1 + childZeroHash.Length, childZeroHash.Length);
             hashes[level] = hashFunction.ComputeHash(internalNodeData);

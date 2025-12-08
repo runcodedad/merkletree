@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using System.Linq;
 using Xunit;
 using MerkleTree.Hashing;
@@ -230,8 +231,8 @@ public class ZeroHashTableTests
         // Arrange
         var tooShort = new byte[5];
         var invalidDepth = new byte[12];
-        // Set depth to 0 (invalid)
-        BitConverter.GetBytes(0).CopyTo(invalidDepth, 0);
+        // Set depth to 0 (invalid) using little-endian byte order
+        BinaryPrimitives.WriteInt32LittleEndian(invalidDepth.AsSpan(0, 4), 0);
 
         // Act & Assert
         Assert.Throws<ArgumentException>(() => ZeroHashTable.Deserialize(tooShort));

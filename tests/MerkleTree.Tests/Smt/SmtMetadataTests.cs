@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Binary;
 using Xunit;
 using MerkleTree.Hashing;
 using MerkleTree.Smt;
@@ -255,9 +256,9 @@ public class SmtMetadataTests
         var metadata = SmtMetadata.Create(hashFunction, 8);
         var serialized = metadata.Serialize();
 
-        // Modify the serialization version to an unsupported value
+        // Modify the serialization version to an unsupported value using little-endian byte order
         var unsupportedVersion = 999;
-        BitConverter.GetBytes(unsupportedVersion).CopyTo(serialized, 0);
+        BinaryPrimitives.WriteInt32LittleEndian(serialized.AsSpan(0, 4), unsupportedVersion);
 
         // Act & Assert
         Assert.Throws<InvalidOperationException>(() => SmtMetadata.Deserialize(serialized));
