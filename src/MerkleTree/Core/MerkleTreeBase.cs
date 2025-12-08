@@ -39,7 +39,7 @@ public abstract class MerkleTreeBase
     /// This prefix is prepended to leaf data before hashing to distinguish leaf hashes
     /// from internal node hashes, preventing collision attacks.
     /// </remarks>
-    protected const byte LeafDomainSeparator = 0x00;
+    public const byte LeafDomainSeparator = 0x00;
 
     /// <summary>
     /// Domain separator byte for internal node hashing (0x01).
@@ -48,12 +48,12 @@ public abstract class MerkleTreeBase
     /// This prefix is prepended when hashing two child nodes together to create a parent hash,
     /// distinguishing internal node hashes from leaf hashes and padding hashes.
     /// </remarks>
-    protected const byte InternalNodeDomainSeparator = 0x01;
+    public const byte InternalNodeDomainSeparator = 0x01;
 
     /// <summary>
     /// The domain separator used for padding hashes.
     /// </summary>
-    protected const string PaddingDomainSeparator = "MERKLE_PADDING";
+    public const string PaddingDomainSeparator = "MERKLE_PADDING";
 
     /// <summary>
     /// The hash function used for computing node hashes.
