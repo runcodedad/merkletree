@@ -1,9 +1,4 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace MerkleTree.Smt.Persistence;
 
@@ -38,10 +33,10 @@ namespace MerkleTree.Smt.Persistence;
 /// </remarks>
 public sealed class InMemorySmtStorage : ISmtNodeReader, ISmtNodeWriter, ISmtSnapshotManager, ISmtMetadataStore
 {
-    private readonly object _lock = new object();
-    private readonly Dictionary<string, byte[]> _nodesByHash = new Dictionary<string, byte[]>();
-    private readonly Dictionary<string, byte[]> _nodesByPath = new Dictionary<string, byte[]>();
-    private readonly Dictionary<string, SmtSnapshotInfo> _snapshots = new Dictionary<string, SmtSnapshotInfo>();
+    private readonly object _lock = new();
+    private readonly Dictionary<string, byte[]> _nodesByHash = [];
+    private readonly Dictionary<string, byte[]> _nodesByPath = [];
+    private readonly Dictionary<string, SmtSnapshotInfo> _snapshots = [];
     private SmtMetadata? _metadata;
     private byte[]? _currentRoot;
 

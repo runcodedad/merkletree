@@ -1,5 +1,3 @@
-using System;
-
 namespace MerkleTree.Smt.Persistence;
 
 /// <summary>
