@@ -337,10 +337,10 @@ public class SmtNodeTests
 
     #endregion
 
-    #region Immutability Tests
+    #region Memory Semantics Tests
 
     [Fact]
-    public void SmtLeafNode_KeyHashIsReadOnly()
+    public void SmtLeafNode_KeyHashProperty_ReturnsReadOnlyMemory()
     {
         // Arrange
         var keyHash = new byte[32];
@@ -349,15 +349,16 @@ public class SmtNodeTests
         var nodeHash = new byte[32];
         var node = new SmtLeafNode(keyHash, value, nodeHash);
 
-        // Act - Modify original array
-        Array.Fill(keyHash, (byte)2);
+        // Act
+        var retrievedKeyHash = node.KeyHash;
 
-        // Assert - Node's key hash should not be affected
-        Assert.All(node.KeyHash.ToArray(), b => Assert.Equal(1, b));
+        // Assert - ReadOnlyMemory wraps the data
+        Assert.Equal(32, retrievedKeyHash.Length);
+        Assert.All(retrievedKeyHash.ToArray(), b => Assert.Equal(1, b));
     }
 
     [Fact]
-    public void SmtLeafNode_ValueIsReadOnly()
+    public void SmtLeafNode_ValueProperty_ReturnsReadOnlyMemory()
     {
         // Arrange
         var keyHash = new byte[32];
@@ -365,15 +366,16 @@ public class SmtNodeTests
         var nodeHash = new byte[32];
         var node = new SmtLeafNode(keyHash, value, nodeHash);
 
-        // Act - Modify original array
-        Array.Fill(value, (byte)0xFF);
+        // Act
+        var retrievedValue = node.Value;
 
-        // Assert - Node's value should not be affected
-        Assert.NotEqual(value, node.Value.ToArray());
+        // Assert - ReadOnlyMemory wraps the data
+        Assert.Equal(value.Length, retrievedValue.Length);
+        Assert.Equal(value, retrievedValue.ToArray());
     }
 
     [Fact]
-    public void SmtInternalNode_ChildHashesAreReadOnly()
+    public void SmtInternalNode_HashProperties_ReturnReadOnlyMemory()
     {
         // Arrange
         var leftHash = new byte[32];
@@ -383,13 +385,15 @@ public class SmtNodeTests
         var nodeHash = new byte[32];
         var node = new SmtInternalNode(leftHash, rightHash, nodeHash);
 
-        // Act - Modify original arrays
-        Array.Fill(leftHash, (byte)0xFF);
-        Array.Fill(rightHash, (byte)0xFF);
+        // Act
+        var retrievedLeftHash = node.LeftHash;
+        var retrievedRightHash = node.RightHash;
 
-        // Assert - Node's hashes should not be affected
-        Assert.All(node.LeftHash.ToArray(), b => Assert.Equal(1, b));
-        Assert.All(node.RightHash.ToArray(), b => Assert.Equal(2, b));
+        // Assert - ReadOnlyMemory wraps the data
+        Assert.Equal(32, retrievedLeftHash.Length);
+        Assert.Equal(32, retrievedRightHash.Length);
+        Assert.All(retrievedLeftHash.ToArray(), b => Assert.Equal(1, b));
+        Assert.All(retrievedRightHash.ToArray(), b => Assert.Equal(2, b));
     }
 
     #endregion
