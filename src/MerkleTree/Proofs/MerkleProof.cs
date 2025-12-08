@@ -127,6 +127,13 @@ public class MerkleProof
     /// <returns>True if the proof is valid and produces the expected root hash; otherwise, false.</returns>
     /// <exception cref="ArgumentNullException">Thrown when any parameter is null.</exception>
     /// <exception cref="InvalidOperationException">Thrown when sibling hashes are null or empty.</exception>
+    /// <remarks>
+    /// This method uses domain-separated hashing to prevent collision attacks:
+    /// <list type="bullet">
+    /// <item><description>Leaf hash: Hash(0x00 || leafValue)</description></item>
+    /// <item><description>Internal node hash: Hash(0x01 || left || right)</description></item>
+    /// </list>
+    /// </remarks>
     public bool Verify(byte[] expectedRootHash, IHashFunction hashFunction)
     {
         if (expectedRootHash == null)
@@ -134,8 +141,11 @@ public class MerkleProof
         if (hashFunction == null)
             throw new ArgumentNullException(nameof(hashFunction));
 
-        // Start by hashing the leaf value
-        var currentHash = hashFunction.ComputeHash(LeafValue);
+        // Start by hashing the leaf value with domain separation
+        var prefixedLeaf = new byte[LeafValue.Length + 1];
+        prefixedLeaf[0] = 0x00; // Leaf domain separator
+        Array.Copy(LeafValue, 0, prefixedLeaf, 1, LeafValue.Length);
+        var currentHash = hashFunction.ComputeHash(prefixedLeaf);
 
         // Traverse from leaf to root, computing parent hashes
         for (int i = 0; i < TreeHeight; i++)
@@ -150,20 +160,26 @@ public class MerkleProof
             
             var isRight = SiblingIsRight[i];
 
-            // Compute parent hash: Hash(left || right)
-            byte[] combinedHash;
+            // Compute parent hash with domain separation: Hash(0x01 || left || right)
+            byte[] combinedData;
             if (isRight)
             {
                 // Sibling is on the right, current node is on the left
-                combinedHash = currentHash.Concat(siblingHash).ToArray();
+                combinedData = new byte[1 + currentHash.Length + siblingHash.Length];
+                combinedData[0] = 0x01; // Internal node domain separator
+                Array.Copy(currentHash, 0, combinedData, 1, currentHash.Length);
+                Array.Copy(siblingHash, 0, combinedData, 1 + currentHash.Length, siblingHash.Length);
             }
             else
             {
                 // Sibling is on the left, current node is on the right
-                combinedHash = siblingHash.Concat(currentHash).ToArray();
+                combinedData = new byte[1 + siblingHash.Length + currentHash.Length];
+                combinedData[0] = 0x01; // Internal node domain separator
+                Array.Copy(siblingHash, 0, combinedData, 1, siblingHash.Length);
+                Array.Copy(currentHash, 0, combinedData, 1 + siblingHash.Length, currentHash.Length);
             }
 
-            currentHash = hashFunction.ComputeHash(combinedHash);
+            currentHash = hashFunction.ComputeHash(combinedData);
         }
 
         // Compare the computed root hash with the expected root hash

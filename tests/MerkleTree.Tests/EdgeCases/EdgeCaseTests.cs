@@ -283,7 +283,7 @@ public class EdgeCaseTests
         var rootNode = new MerkleTreeNode(rootHash);
 
         // Act - Negative height is accepted (no validation in implementation)
-        var metadata = new MerkleTreeMetadata(rootNode, -1, 10);
+        var metadata = new MerkleTreeMetadata(rootNode, -1, 10, "SHA-256");
 
         // Assert - Metadata is created with the provided values
         Assert.Equal(-1, metadata.Height);
@@ -298,7 +298,7 @@ public class EdgeCaseTests
         var rootNode = new MerkleTreeNode(rootHash);
 
         // Act - Zero leaf count is accepted (no validation in implementation)
-        var metadata = new MerkleTreeMetadata(rootNode, 0, 0);
+        var metadata = new MerkleTreeMetadata(rootNode, 0, 0, "SHA-256");
 
         // Assert - Metadata is created with the provided values
         Assert.Equal(0, metadata.Height);
@@ -313,7 +313,7 @@ public class EdgeCaseTests
         var rootNode = new MerkleTreeNode(rootHash);
 
         // Act - Negative leaf count is accepted (no validation in implementation)
-        var metadata = new MerkleTreeMetadata(rootNode, 0, -1);
+        var metadata = new MerkleTreeMetadata(rootNode, 0, -1, "SHA-256");
 
         // Assert - Metadata is created with the provided values
         Assert.Equal(0, metadata.Height);
