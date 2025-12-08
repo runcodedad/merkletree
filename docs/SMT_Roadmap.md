@@ -13,10 +13,11 @@ This roadmap outlines a minimal, dependency-aware implementation path for the SM
    - Implement hash algorithm abstraction and domain-separated hashing primitives.
      - Tracked in issue: #39
    - Define metadata and zero-hash generation utilities.
-     - Tracked in issue: #43
+     - Tracked in issue: #43 ✅ **COMPLETED**
    - Deliverables:
      - HashAlgorithm interface (SHA-256 default)
-     - Deterministic zero-hash table generator
+     - Deterministic zero-hash table generator ✅ **COMPLETED**
+     - SMT metadata structure (hash algorithm, depth, versions) ✅ **COMPLETED**
    - Why first: hashing and metadata are prerequisites for bit-path derivation and proof verification.
 
 2. Interfaces & Model
@@ -75,7 +76,7 @@ Adjust per team size and desired depth of test coverage.
 
 ## References
 - #39 — Hash abstraction & domain-separated hashing  
-- #43 — Metadata structure & zero-hash table  
+- #43 — Metadata structure & zero-hash table ✅ **COMPLETED** — See [SMT_METADATA.md](./SMT_METADATA.md)
 - #42 — Persistence abstraction interfaces  
 - #38 — Tree model & key → bit-path mapping  
 - #44 — Error handling model  
