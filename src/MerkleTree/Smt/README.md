@@ -5,6 +5,7 @@ A storage-agnostic, deterministic Sparse Merkle Tree implementation supporting p
 ## Table of Contents
 
 - [Overview](#overview)
+- [Core Tree Model and API](#core-tree-model-and-api)
 - [Metadata Structure](#metadata-structure)
 - [Creating and Using Metadata](#creating-and-using-metadata)
 - [Serialization](#serialization)
@@ -22,6 +23,383 @@ The SMT core library is built on three key principles:
 - **Pluggable**: Hashing and persistence are abstracted and injectable
 
 The metadata structure provides essential information for deterministic reproduction of Sparse Merkle Tree roots and proofs across machines, platforms, and implementations.
+
+## Core Tree Model and API
+
+The `SparseMerkleTree` class provides the primary API for creating and managing Sparse Merkle Trees. It implements a deterministic, binary tree structure that maps arbitrary-length keys to fixed-depth bit paths and supports efficient storage and proof generation.
+
+### Overview
+
+The core tree model consists of:
+
+- **SparseMerkleTree**: Main API class with configurable depth and pluggable hash functions
+- **Node Types**: Three distinct node types representing the tree structure
+- **Key-to-Path Mapping**: Deterministic conversion of arbitrary keys to fixed-length bit paths
+- **Domain-Separated Hashing**: Prevention of collision attacks using distinct prefixes for leaves and internal nodes
+
+### Key Features
+
+- **Configurable Depth**: Default depth of 256 for SHA-256 (matching output size), customizable at initialization
+- **Arbitrary-Length Keys**: Accepts keys of any length; internally maps them to fixed-length bit paths via hash function
+- **Three Node Types**: Empty nodes (zero-hashes), leaf nodes (key-value pairs), internal nodes (two children)
+- **Domain Separation**: Uses `0x00` prefix for leaves, `0x01` prefix for internal nodes to prevent collision attacks
+- **Immutable Structures**: All nodes use `ReadOnlyMemory<byte>` for thread-safe, immutable data
+- **Thread-Safe Operations**: All operations are thread-safe and can be called concurrently
+- **Cross-Platform Determinism**: Identical inputs produce identical outputs on all platforms
+
+### Creating a Sparse Merkle Tree
+
+#### Default Depth (256)
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+
+Console.WriteLine($"Tree depth: {tree.Depth}"); // Output: 256
+Console.WriteLine($"Max capacity: 2^{tree.Depth} keys");
+```
+
+#### Custom Depth
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction, treeDepth: 160);
+
+Console.WriteLine($"Tree depth: {tree.Depth}"); // Output: 160
+Console.WriteLine($"Hash algorithm: {tree.Metadata.HashAlgorithmId}"); // Output: SHA-256
+```
+
+**Depth Guidelines:**
+
+- **Small Trees (depth 8-16)**: Testing, small datasets (256 to 65K keys)
+- **Medium Trees (depth 32-64)**: Application-specific use cases (billions to quintillions of keys)
+- **Large Trees (depth 160-256)**: Cryptographic applications, blockchain systems (2^160 to 2^256 keys)
+
+### Key-to-Path Mapping
+
+Sparse Merkle Trees map arbitrary-length keys to fixed-length bit paths using the hash function. This ensures uniform distribution and fixed tree depth regardless of key format.
+
+#### Mapping Process
+
+1. **Hash the Key**: Apply the hash function to the key bytes
+2. **Convert to Bits**: Extract bits from the hash output
+3. **Truncate or Pad**: Adjust to match tree depth
+4. **Use as Path**: Each bit determines left (0/false) or right (1/true) traversal
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction, treeDepth: 256);
+
+// Convert arbitrary key to bit path
+var key = Encoding.UTF8.GetBytes("user:alice:balance");
+var bitPath = tree.GetBitPath(key);
+
+Console.WriteLine($"Key length: {key.Length} bytes");
+Console.WriteLine($"Bit path length: {bitPath.Length} bits"); // Output: 256
+Console.WriteLine($"First 8 bits: {string.Join("", bitPath[0..8].Select(b => b ? "1" : "0"))}");
+```
+
+#### Path Properties
+
+- **Deterministic**: Same key always produces same path
+- **Uniform Distribution**: Hash function ensures even distribution across tree
+- **Fixed Length**: Always matches tree depth (e.g., 256 bits for depth 256)
+- **Platform Independent**: Identical across all platforms and implementations
+
+### Node Types
+
+The SMT uses three distinct node types to represent the tree structure efficiently:
+
+#### 1. Empty Node (SmtEmptyNode)
+
+Represents an empty subtree. Uses precomputed zero-hashes from the zero-hash table for efficiency.
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+
+// Create an empty node at level 0 (leaf level)
+var emptyNode = tree.CreateEmptyNode(level: 0);
+
+Console.WriteLine($"Node type: {emptyNode.GetType().Name}"); // Output: SmtEmptyNode
+Console.WriteLine($"Level: {emptyNode.Level}");
+Console.WriteLine($"Hash: {Convert.ToHexString(emptyNode.Hash.Span)}");
+
+// Empty nodes at different levels have different hashes
+var emptyLevel5 = tree.CreateEmptyNode(level: 5);
+Console.WriteLine($"Different hash: {!emptyNode.Hash.Span.SequenceEqual(emptyLevel5.Hash.Span)}");
+```
+
+**Properties:**
+
+- Uses zero-hash table for O(1) hash lookup
+- No key or value stored
+- Level determines which zero-hash to use
+- Memory efficient (shares zero-hash table across all empty nodes)
+
+#### 2. Leaf Node (SmtLeafNode)
+
+Represents a key-value pair at the bottom of the tree.
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+
+// Create a leaf node
+var key = Encoding.UTF8.GetBytes("account:123");
+var value = Encoding.UTF8.GetBytes("balance:1000");
+var leafNode = tree.CreateLeafNode(key, value);
+
+Console.WriteLine($"Node type: {leafNode.GetType().Name}"); // Output: SmtLeafNode
+Console.WriteLine($"Key hash: {Convert.ToHexString(leafNode.KeyHash.Span)}");
+Console.WriteLine($"Value: {Encoding.UTF8.GetString(leafNode.Value.Span)}");
+Console.WriteLine($"Hash: {Convert.ToHexString(leafNode.Hash.Span)}");
+```
+
+**Hash Computation:**
+
+```
+leaf_hash = Hash(0x00 || key || value)
+```
+
+Where:
+- `0x00` is the leaf domain separator
+- `||` denotes byte concatenation
+
+**Properties:**
+
+- Stores both key and value as `ReadOnlyMemory<byte>`
+- Uses domain separator `0x00` to prevent collision with internal nodes
+- Immutable after creation
+- Key and value can be arbitrary length
+
+#### 3. Internal Node (SmtInternalNode)
+
+Represents an internal node with left and right children.
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+
+// Create internal node from two children
+var leftChild = tree.CreateEmptyNode(level: 0);
+var rightChild = tree.CreateLeafNode(
+    Encoding.UTF8.GetBytes("key1"),
+    Encoding.UTF8.GetBytes("value1")
+);
+var internalNode = tree.CreateInternalNode(leftChild.Hash.ToArray(), rightChild.Hash.ToArray());
+
+Console.WriteLine($"Node type: {internalNode.GetType().Name}"); // Output: SmtInternalNode
+Console.WriteLine($"Left hash: {Convert.ToHexString(internalNode.LeftHash.Span)}");
+Console.WriteLine($"Right hash: {Convert.ToHexString(internalNode.RightHash.Span)}");
+Console.WriteLine($"Node hash: {Convert.ToHexString(internalNode.Hash.Span)}");
+```
+
+**Hash Computation:**
+
+```
+internal_hash = Hash(0x01 || left_child_hash || right_child_hash)
+```
+
+Where:
+- `0x01` is the internal node domain separator
+- `||` denotes byte concatenation
+
+**Properties:**
+
+- Stores hashes of left and right children
+- Uses domain separator `0x01` to prevent collision with leaf nodes
+- Children can be any node type (empty, leaf, or internal)
+- Hash is deterministic based on children's hashes
+
+### Domain-Separated Hashing
+
+Domain separation prevents collision attacks by ensuring that leaf nodes and internal nodes produce different hashes even with identical input data.
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+
+// Create a leaf node
+var leafKey = new byte[] { 0x01, 0x02 };
+var leafValue = new byte[] { 0x03, 0x04 };
+var leafNode = tree.CreateLeafNode(leafKey, leafValue);
+
+// Create an internal node with same byte sequence
+var leftHash = new byte[] { 0x01, 0x02 };
+var rightHash = new byte[] { 0x03, 0x04 };
+// Note: This is a conceptual example - actual API may differ for direct hash construction
+
+// The hashes will be different due to domain separation:
+// Leaf: Hash(0x00 || 0x01 || 0x02 || 0x03 || 0x04)
+// Internal: Hash(0x01 || left_hash || right_hash)
+Console.WriteLine("Domain separation ensures different hashes for different node types");
+```
+
+**Security Benefits:**
+
+- **Prevents Second-Preimage Attacks**: Attacker cannot find leaf that hashes to same value as internal node
+- **Ensures Collision Resistance**: Different node types cannot produce same hash
+- **Standard Practice**: Follows industry best practices for Merkle tree implementations
+
+### Accessing Tree Metadata
+
+The tree exposes metadata for inspection and serialization:
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction, treeDepth: 160);
+
+// Access metadata
+var metadata = tree.Metadata;
+Console.WriteLine($"Hash Algorithm: {metadata.HashAlgorithmId}");
+Console.WriteLine($"Tree Depth: {metadata.TreeDepth}");
+Console.WriteLine($"SMT Core Version: {metadata.SmtCoreVersion}");
+Console.WriteLine($"Serialization Format Version: {metadata.SerializationFormatVersion}");
+
+// Access zero-hash table
+var zeroHashes = metadata.ZeroHashes;
+Console.WriteLine($"Zero-hash table size: {zeroHashes.Count}"); // Output: 161 (depth + 1)
+
+// Get zero-hash for specific level
+var zeroHashLevel0 = zeroHashes[0]; // Empty leaf
+var zeroHashLevel160 = zeroHashes[160]; // Empty root
+
+// Serialize metadata for storage
+byte[] serializedMetadata = metadata.Serialize();
+Console.WriteLine($"Serialized metadata size: {serializedMetadata.Length} bytes");
+```
+
+### Thread Safety
+
+All tree operations are thread-safe and can be called concurrently:
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+
+// Safe to call from multiple threads
+var tasks = Enumerable.Range(0, 100).Select(i =>
+    Task.Run(() =>
+    {
+        var key = Encoding.UTF8.GetBytes($"key{i}");
+        var value = Encoding.UTF8.GetBytes($"value{i}");
+        var node = tree.CreateLeafNode(key, value);
+        return node.Hash;
+    })
+);
+
+var hashes = await Task.WhenAll(tasks);
+Console.WriteLine($"Created {hashes.Length} nodes concurrently");
+```
+
+**Thread-Safety Guarantees:**
+
+- Node creation methods are thread-safe
+- Metadata access is thread-safe (immutable after creation)
+- Key-to-path conversion is thread-safe
+- Multiple threads can create nodes concurrently without locks
+
+### Complete Example
+
+```csharp
+using System.Text;
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+
+// Initialize tree with SHA-256 and default depth
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+
+Console.WriteLine($"Created SMT with depth {tree.Depth}");
+Console.WriteLine($"Using {tree.Metadata.HashAlgorithmId}");
+
+// Example 1: Convert keys to bit paths
+var userKey = Encoding.UTF8.GetBytes("user:alice");
+var bitPath = tree.GetBitPath(userKey);
+Console.WriteLine($"Key 'user:alice' maps to {bitPath.Length}-bit path");
+
+// Example 2: Create different node types
+var emptyNode = tree.CreateEmptyNode(level: 0);
+Console.WriteLine($"Empty node hash: {Convert.ToHexString(emptyNode.Hash.Span)}");
+
+var leafNode = tree.CreateLeafNode(
+    Encoding.UTF8.GetBytes("account:123"),
+    Encoding.UTF8.GetBytes("balance:1000")
+);
+Console.WriteLine($"Leaf node hash: {Convert.ToHexString(leafNode.Hash.Span)}");
+
+var internalNode = tree.CreateInternalNode(emptyNode.Hash.ToArray(), leafNode.Hash.ToArray());
+Console.WriteLine($"Internal node hash: {Convert.ToHexString(internalNode.Hash.Span)}");
+
+// Example 3: Access metadata
+var metadata = tree.Metadata;
+Console.WriteLine($"\nMetadata:");
+Console.WriteLine($"  Hash Algorithm: {metadata.HashAlgorithmId}");
+Console.WriteLine($"  Depth: {metadata.TreeDepth}");
+Console.WriteLine($"  Core Version: {metadata.SmtCoreVersion}");
+Console.WriteLine($"  Zero-hash table entries: {metadata.ZeroHashes.Count}");
+
+// Example 4: Verify determinism
+var tree2 = new SparseMerkleTree(hashFunction);
+var leafNode2 = tree2.CreateLeafNode(
+    Encoding.UTF8.GetBytes("account:123"),
+    Encoding.UTF8.GetBytes("balance:1000")
+);
+bool hashesMatch = leafNode.Hash.Span.SequenceEqual(leafNode2.Hash.Span);
+Console.WriteLine($"\nDeterminism verified: {hashesMatch}");
+```
+
+### Design Principles
+
+The core tree model follows these design principles:
+
+1. **Immutability**: All node structures are immutable after creation
+2. **Type Safety**: Distinct types for empty, leaf, and internal nodes prevent errors
+3. **Determinism**: Same inputs always produce same outputs across all platforms
+4. **Performance**: Zero-hash table precomputation provides O(1) empty node creation
+5. **Security**: Domain separation prevents collision attacks
+6. **Simplicity**: Clean API with minimal surface area
+7. **Testability**: Pure functions enable easy testing and verification
+
+### Next Steps
+
+With the core tree model in place, you can:
+
+- **Store Nodes**: Use the persistence interfaces to store nodes in your chosen backend
+- **Build Trees**: Implement insert, update, and delete operations using the node creation API
+- **Generate Proofs**: Create inclusion and non-inclusion proofs using the bit-path mapping
+- **Verify Trees**: Use metadata to ensure compatibility across different trees
+- **Optimize Performance**: Leverage zero-hash table for efficient sparse tree operations
+
+See the following sections for more details on metadata, serialization, and persistence.
 
 ## Metadata Structure
 
