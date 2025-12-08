@@ -775,7 +775,7 @@ public sealed class SparseMerkleTree
                     // Rest of path is empty
                     for (int i = level; i < Depth; i++)
                     {
-                        siblings[i] = ZeroHashes[i];
+                        siblings[i] = ZeroHashes[Depth - 1 - i];
                     }
                     break;
                 }
@@ -787,7 +787,7 @@ public sealed class SparseMerkleTree
                     // Node not found - rest of path is empty
                     for (int i = level; i < Depth; i++)
                     {
-                        siblings[i] = ZeroHashes[i];
+                        siblings[i] = ZeroHashes[Depth - 1 - i];
                     }
                     break;
                 }
@@ -807,7 +807,7 @@ public sealed class SparseMerkleTree
                     // Leaf or empty - rest of path uses zero hashes
                     for (int i = level; i < Depth; i++)
                     {
-                        siblings[i] = ZeroHashes[i];
+                        siblings[i] = ZeroHashes[Depth - 1 - i];
                     }
                     break;
                 }
@@ -816,9 +816,12 @@ public sealed class SparseMerkleTree
         else
         {
             // Empty tree - all siblings are zero hashes
-            for (int i = 0; i < Depth; i++)
+            // Map level (from root perspective) to zero hash level (from leaf perspective)
+            for (int level = 0; level < Depth; level++)
             {
-                siblings[i] = ZeroHashes[i];
+                // At tree level `level` (0=root, Depth-1=near leaf),
+                // the sibling is an empty subtree of height (Depth-1-level)
+                siblings[level] = ZeroHashes[Depth - 1 - level];
             }
         }
         
