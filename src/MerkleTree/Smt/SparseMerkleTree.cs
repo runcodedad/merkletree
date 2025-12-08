@@ -1,4 +1,3 @@
-using System;
 using MerkleTree.Core;
 using MerkleTree.Hashing;
 

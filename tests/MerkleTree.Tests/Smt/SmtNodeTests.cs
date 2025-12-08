@@ -1,6 +1,4 @@
-using System;
 using System.Text;
-using Xunit;
 using MerkleTree.Smt;
 
 namespace MerkleTree.Tests.Smt;
