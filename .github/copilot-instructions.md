@@ -12,7 +12,7 @@ Purpose: short, direct guidelines for contributors and Copilot suggestions.
 ## Markdown Documentation
 - Keep main `README.md` as a general overview and directory to specific docs
 - Never include implementation specifics in main `README.md`
-- Always create project-specific `README.md` for each `MerkleTree.*` project in `src/`
+- Always create project-specific `README.md` for each `MerkleTree.*` project or namespace in `src/`
 - Always include architecture, usage examples, and API documentation in project READMEs
 - Never create READMEs for test projects (`*.Tests`)
 - Always place non-project-specific documentation in `docs/` folder
