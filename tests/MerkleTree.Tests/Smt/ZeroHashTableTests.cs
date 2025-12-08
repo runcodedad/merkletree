@@ -229,10 +229,11 @@ public class ZeroHashTableTests
     public void Deserialize_InvalidData_ThrowsArgumentException()
     {
         // Arrange
+        const int Int32SizeInBytes = 4;
         var tooShort = new byte[5];
         var invalidDepth = new byte[12];
         // Set depth to 0 (invalid) using little-endian byte order
-        BinaryPrimitives.WriteInt32LittleEndian(invalidDepth.AsSpan(0, 4), 0);
+        BinaryPrimitives.WriteInt32LittleEndian(invalidDepth.AsSpan(0, Int32SizeInBytes), 0);
 
         // Act & Assert
         Assert.Throws<ArgumentException>(() => ZeroHashTable.Deserialize(tooShort));

@@ -252,13 +252,14 @@ public class SmtMetadataTests
     public void Deserialize_UnsupportedVersion_ThrowsInvalidOperationException()
     {
         // Arrange
+        const int SerializationVersionSizeInBytes = 4;
         var hashFunction = new Sha256HashFunction();
         var metadata = SmtMetadata.Create(hashFunction, 8);
         var serialized = metadata.Serialize();
 
         // Modify the serialization version to an unsupported value using little-endian byte order
         var unsupportedVersion = 999;
-        BinaryPrimitives.WriteInt32LittleEndian(serialized.AsSpan(0, 4), unsupportedVersion);
+        BinaryPrimitives.WriteInt32LittleEndian(serialized.AsSpan(0, SerializationVersionSizeInBytes), unsupportedVersion);
 
         // Act & Assert
         Assert.Throws<InvalidOperationException>(() => SmtMetadata.Deserialize(serialized));

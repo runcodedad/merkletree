@@ -45,8 +45,6 @@ namespace MerkleTree.Smt;
 /// </remarks>
 public sealed class ZeroHashTable
 {
-
-
     private readonly byte[][] _hashes;
 
     /// <summary>
