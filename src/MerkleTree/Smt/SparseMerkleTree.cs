@@ -490,6 +490,8 @@ public sealed class SparseMerkleTree
         for (int level = 0; level < Depth; level++)
         {
             // Check if we've reached an empty node (zero hash)
+            // At tree level `level` (0=root), we have a subtree of height (Depth-level)
+            // So we check against ZeroHashes[Depth-level]
             if (currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
             {
                 return SmtGetResult.CreateNotFound();
@@ -770,12 +772,14 @@ public sealed class SparseMerkleTree
             for (int level = 0; level < Depth; level++)
             {
                 // Check if current node is a zero hash
+                // At tree level `level` (0=root), current node represents subtree of height (Depth-level)
                 if (traverseHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
                 {
                     // Rest of path is empty
+                    // When building at level i, sibling is at height i
                     for (int i = level; i < Depth; i++)
                     {
-                        siblings[i] = ZeroHashes[Depth - 1 - i];
+                        siblings[i] = ZeroHashes[i];
                     }
                     break;
                 }
@@ -787,7 +791,7 @@ public sealed class SparseMerkleTree
                     // Node not found - rest of path is empty
                     for (int i = level; i < Depth; i++)
                     {
-                        siblings[i] = ZeroHashes[Depth - 1 - i];
+                        siblings[i] = ZeroHashes[i];
                     }
                     break;
                 }
@@ -807,7 +811,7 @@ public sealed class SparseMerkleTree
                     // Leaf or empty - rest of path uses zero hashes
                     for (int i = level; i < Depth; i++)
                     {
-                        siblings[i] = ZeroHashes[Depth - 1 - i];
+                        siblings[i] = ZeroHashes[i];
                     }
                     break;
                 }
@@ -816,12 +820,12 @@ public sealed class SparseMerkleTree
         else
         {
             // Empty tree - all siblings are zero hashes
-            // Map level (from root perspective) to zero hash level (from leaf perspective)
+            // When building at loop level `level` (Depth-1 down to 0),
+            // we're creating an internal node at tree height (level+1)
+            // The sibling should be an empty subtree of height level
             for (int level = 0; level < Depth; level++)
             {
-                // At tree level `level` (0=root, Depth-1=near leaf),
-                // the sibling is an empty subtree of height (Depth-1-level)
-                siblings[level] = ZeroHashes[Depth - 1 - level];
+                siblings[level] = ZeroHashes[level];
             }
         }
         
