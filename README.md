@@ -504,7 +504,11 @@ For detailed information, see:
 
 - [Proof Generation Documentation](docs/PROOF_GENERATION.md) - Complete guide to generating and verifying Merkle proofs
 - [Proof Serialization Format](docs/PROOF_SERIALIZATION.md) - Binary serialization format specification
+- [Cache Serialization Format](docs/CACHE_SERIALIZATION.md) - Binary format for persistent Merkle tree cache storage
 - [Streaming Documentation](docs/STREAMING.md) - Details on streaming tree construction for large datasets
+- [Sparse Merkle Tree (SMT)](src/MerkleTree/Smt/README.md) - Complete SMT implementation with pluggable persistence and key-value operations
+- [SMT Operations Status](docs/SMT_OPERATIONS_STATUS.md) - Status report on SMT core operations implementation
+- [SMT Implementation Notes](docs/SMT_IMPLEMENTATION_NOTES.md) - Technical details and debugging guide for SMT operations
 - XML documentation comments in the source code
 - IntelliSense in your IDE
 
