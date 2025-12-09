@@ -1,3 +1,5 @@
+using MerkleTree.Exceptions;
+
 namespace MerkleTree.Smt.Persistence;
 
 /// <summary>
@@ -22,7 +24,7 @@ namespace MerkleTree.Smt.Persistence;
 /// <para><strong>Error Handling:</strong></para>
 /// <para>
 /// Implementations should wrap storage-level errors (I/O failures, network issues, database errors, etc.)
-/// in <see cref="MerkleTree.Exceptions.StorageAdapterException"/> to provide consistent error reporting.
+/// in <see cref="StorageAdapterException"/> to provide consistent error reporting.
 /// Missing nodes should return null rather than throwing exceptions.
 /// </para>
 /// </remarks>
@@ -38,7 +40,7 @@ public interface ISmtNodeReader
     /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="hash"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="hash"/> is empty.</exception>
-    /// <exception cref="MerkleTree.Exceptions.StorageAdapterException">Thrown when an adapter-level error occurs (I/O failure, database error, corrupted data, etc.).</exception>
+    /// <exception cref="StorageAdapterException">Thrown when an adapter-level error occurs (I/O failure, database error, corrupted data, etc.).</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>
@@ -69,7 +71,7 @@ public interface ISmtNodeReader
     /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="path"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> is empty.</exception>
-    /// <exception cref="MerkleTree.Exceptions.StorageAdapterException">Thrown when an adapter-level error occurs.</exception>
+    /// <exception cref="StorageAdapterException">Thrown when an adapter-level error occurs.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>
@@ -101,7 +103,7 @@ public interface ISmtNodeReader
     /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="hash"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="hash"/> is empty.</exception>
-    /// <exception cref="MerkleTree.Exceptions.StorageAdapterException">Thrown when an adapter-level error occurs.</exception>
+    /// <exception cref="StorageAdapterException">Thrown when an adapter-level error occurs.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>

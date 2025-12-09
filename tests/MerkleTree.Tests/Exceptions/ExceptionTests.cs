@@ -1,5 +1,3 @@
-using System;
-using Xunit;
 using MerkleTree.Exceptions;
 
 namespace MerkleTree.Tests.Exceptions;

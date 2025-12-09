@@ -1,12 +1,7 @@
-using System;
-using System.Text;
-using Xunit;
 using MerkleTree.Exceptions;
 using MerkleTree.Hashing;
 using MerkleTree.Proofs;
 using MerkleTree.Smt;
-using MerkleTree.Smt.Persistence;
-using MerkleTreeClass = MerkleTree.Core.MerkleTree;
 
 namespace MerkleTree.Tests.Exceptions;
 
