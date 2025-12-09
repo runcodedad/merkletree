@@ -401,6 +401,337 @@ With the core tree model in place, you can:
 
 See the following sections for more details on metadata, serialization, and persistence.
 
+## Tree Operations
+
+The `SparseMerkleTree` class provides four core operations: `GetAsync`, `UpdateAsync`, `DeleteAsync`, and `BatchUpdateAsync`. These operations follow different persistence patterns depending on whether you need control over when nodes are written to storage.
+
+### Persistence Design Pattern
+
+**Single Operations (`UpdateAsync` and `DeleteAsync`):**
+- **Stateless and Non-Persisting**: These methods do NOT modify storage directly
+- **Return Results**: They return `SmtUpdateResult` containing:
+  - `NewRootHash`: The updated root hash
+  - `NodesToPersist`: A list of nodes that need to be written to storage
+- **Caller Controls Persistence**: You decide when and how to persist the nodes
+- **Use Case**: When you want to review changes, combine multiple operations, or implement custom persistence strategies
+
+**Batch Operation (`BatchUpdateAsync`):**
+- **Takes Reader AND Writer**: Requires both `ISmtNodeReader` and `ISmtNodeWriter`
+- **Persists Immediately**: Writes nodes to storage after each operation within the batch
+- **Why Immediate Persistence?**: Subsequent operations in the batch need to read nodes created by earlier operations
+- **Also Returns Nodes**: Returns all persisted nodes in the result for tracking/auditing
+- **Use Case**: When you need to apply multiple updates atomically and deterministically
+
+### GetAsync - Read a Value
+
+Retrieves the value associated with a key from the tree.
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+using MerkleTree.Smt.Persistence;
+
+// Setup
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+var storage = new InMemorySmtStorage();
+
+// Assume tree has been populated with data
+var currentRoot = await storage.GetCurrentRootAsync();
+
+// Get a value
+var key = Encoding.UTF8.GetBytes("user:alice");
+var result = await tree.GetAsync(key, currentRoot.Value, storage);
+
+if (result.Found)
+{
+    var value = Encoding.UTF8.GetString(result.Value!.Value.Span);
+    Console.WriteLine($"Found value: {value}");
+}
+else
+{
+    Console.WriteLine("Key not found");
+}
+```
+
+**Properties:**
+- Read-only operation (doesn't modify tree)
+- Returns `SmtGetResult` with `Found` flag and optional `Value`
+- Thread-safe and can be called concurrently
+
+### UpdateAsync - Insert or Update a Key-Value Pair
+
+Updates an existing key or inserts a new key-value pair. Returns nodes for you to persist.
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+using MerkleTree.Smt.Persistence;
+
+// Setup
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+var storage = new InMemorySmtStorage();
+
+// Initialize with empty tree (using zero-hash for root)
+var currentRoot = tree.ZeroHashes[tree.Depth];
+
+// Update a key-value pair
+var key = Encoding.UTF8.GetBytes("user:alice");
+var value = Encoding.UTF8.GetBytes("balance:1000");
+
+var result = await tree.UpdateAsync(key, value, currentRoot, storage);
+
+// result.NodesToPersist contains all nodes that need to be saved
+// result.NewRootHash is the new root after this update
+
+// YOU control when to persist
+await storage.WriteBatchAsync(result.NodesToPersist);
+await storage.UpdateCurrentRootAsync(result.NewRootHash);
+
+Console.WriteLine($"New root: {Convert.ToHexString(result.NewRootHash.Span)}");
+Console.WriteLine($"Nodes to persist: {result.NodesToPersist.Count}");
+```
+
+**Properties:**
+- Returns `SmtUpdateResult` with new root and nodes to persist
+- Doesn't modify storage - you control persistence
+- Uses copy-on-write semantics (only modified path is recreated)
+
+### DeleteAsync - Remove a Key
+
+Deletes a key from the tree. Returns nodes for you to persist.
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+using MerkleTree.Smt.Persistence;
+
+// Setup
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+var storage = new InMemorySmtStorage();
+
+var currentRoot = await storage.GetCurrentRootAsync();
+
+// Delete a key
+var key = Encoding.UTF8.GetBytes("user:bob");
+var result = await tree.DeleteAsync(key, currentRoot.Value, storage);
+
+// YOU control when to persist
+await storage.WriteBatchAsync(result.NodesToPersist);
+await storage.UpdateCurrentRootAsync(result.NewRootHash);
+
+Console.WriteLine($"New root: {Convert.ToHexString(result.NewRootHash.Span)}");
+Console.WriteLine($"Nodes to persist: {result.NodesToPersist.Count}");
+```
+
+**Properties:**
+- Returns `SmtUpdateResult` with new root and nodes to persist
+- Idempotent (deleting non-existent key succeeds without error)
+- Replaces leaf with empty node and reconstructs path
+
+### BatchUpdateAsync - Apply Multiple Updates Atomically
+
+Applies multiple updates and deletes in a deterministic order. Persists nodes immediately.
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+using MerkleTree.Smt.Persistence;
+
+// Setup
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+var storage = new InMemorySmtStorage();
+
+var currentRoot = await storage.GetCurrentRootAsync();
+
+// Prepare batch updates
+var updates = new List<SmtKeyValue>
+{
+    SmtKeyValue.CreateUpdate(
+        Encoding.UTF8.GetBytes("user:alice"),
+        Encoding.UTF8.GetBytes("balance:1000")
+    ),
+    SmtKeyValue.CreateUpdate(
+        Encoding.UTF8.GetBytes("user:bob"),
+        Encoding.UTF8.GetBytes("balance:2000")
+    ),
+    SmtKeyValue.CreateDelete(
+        Encoding.UTF8.GetBytes("user:charlie")
+    )
+};
+
+// Batch update - nodes are persisted IMMEDIATELY during the operation
+var result = await tree.BatchUpdateAsync(
+    updates,
+    currentRoot.Value,
+    storage,  // reader
+    storage,  // writer - persists nodes as they're created
+    CancellationToken.None
+);
+
+// Nodes are already persisted! Just update the root.
+await storage.UpdateCurrentRootAsync(result.NewRootHash);
+
+Console.WriteLine($"New root: {Convert.ToHexString(result.NewRootHash.Span)}");
+Console.WriteLine($"Total nodes persisted: {result.NodesToPersist.Count}");
+```
+
+**Properties:**
+- Takes BOTH reader and writer parameters
+- Persists nodes immediately after each operation in the batch
+- Updates are sorted by key hash for deterministic ordering
+- Last-write-wins for conflicting keys
+- Returns all persisted nodes for tracking purposes
+
+### Comparing Single vs. Batch Operations
+
+**When to use single operations:**
+
+```csharp
+// Scenario 1: You want to review changes before persisting
+var result1 = await tree.UpdateAsync(key1, value1, rootHash, nodeReader);
+var result2 = await tree.UpdateAsync(key2, value2, result1.NewRootHash, nodeReader);
+
+// Review the changes
+Console.WriteLine($"Total nodes: {result1.NodesToPersist.Count + result2.NodesToPersist.Count}");
+
+// Decide whether to persist
+if (shouldPersist)
+{
+    await writer.WriteBatchAsync(result1.NodesToPersist.Concat(result2.NodesToPersist).ToList());
+}
+
+// Scenario 2: Custom persistence strategy
+var allResults = new List<SmtUpdateResult>();
+foreach (var kv in keyValues)
+{
+    var result = await tree.UpdateAsync(kv.Key, kv.Value, currentRoot, nodeReader);
+    allResults.Add(result);
+    currentRoot = result.NewRootHash;
+}
+
+// Persist all at once with custom batching
+await PersistWithCustomStrategy(allResults);
+```
+
+**When to use batch operations:**
+
+```csharp
+// Scenario 1: Atomic updates - all or nothing
+var updates = GetUpdatesFromTransaction();
+var result = await tree.BatchUpdateAsync(updates, currentRoot, storage, storage, ct);
+// All updates are persisted and available for subsequent operations
+
+// Scenario 2: Deterministic multi-update with guaranteed ordering
+var updates = new[]
+{
+    SmtKeyValue.CreateUpdate(key1, value1),
+    SmtKeyValue.CreateUpdate(key2, value2),
+    SmtKeyValue.CreateDelete(key3)
+};
+var result = await tree.BatchUpdateAsync(updates, currentRoot, storage, storage, ct);
+// Updates are applied in deterministic order (sorted by key hash)
+// Each operation can read nodes created by previous operations in the batch
+```
+
+### Key Differences Summary
+
+| Aspect | Single Operations (Update/Delete) | Batch Operation (BatchUpdate) |
+|--------|-----------------------------------|------------------------------|
+| **Persistence** | Returns nodes, you persist | Persists nodes immediately |
+| **Writer Parameter** | No writer needed | Requires writer parameter |
+| **Use Case** | Flexible persistence control | Atomic multi-update |
+| **Node Availability** | Nodes not available until you persist | Nodes immediately available |
+| **Result** | Returns nodes to persist | Returns persisted nodes (for tracking) |
+| **Thread Safety** | Safe if you handle persistence | Safe with proper writer implementation |
+
+### Complete Example: Building a Tree
+
+```csharp
+using System.Text;
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+using MerkleTree.Smt.Persistence;
+
+// Initialize tree and storage
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+var storage = new InMemorySmtStorage();
+
+// Store metadata
+await storage.StoreMetadataAsync(tree.Metadata);
+
+// Start with empty tree
+var currentRoot = tree.ZeroHashes[tree.Depth];
+
+// Example 1: Single operations with manual persistence
+Console.WriteLine("=== Single Operations ===");
+
+var key1 = Encoding.UTF8.GetBytes("user:alice");
+var value1 = Encoding.UTF8.GetBytes("balance:1000");
+var result1 = await tree.UpdateAsync(key1, value1, currentRoot, storage);
+
+Console.WriteLine($"Nodes to persist: {result1.NodesToPersist.Count}");
+
+// Persist when you're ready
+await storage.WriteBatchAsync(result1.NodesToPersist);
+currentRoot = result1.NewRootHash;
+
+// Another update
+var key2 = Encoding.UTF8.GetBytes("user:bob");
+var value2 = Encoding.UTF8.GetBytes("balance:2000");
+var result2 = await tree.UpdateAsync(key2, value2, currentRoot, storage);
+
+await storage.WriteBatchAsync(result2.NodesToPersist);
+currentRoot = result2.NewRootHash;
+
+// Verify with Get
+var getResult = await tree.GetAsync(key1, currentRoot, storage);
+Console.WriteLine($"Alice's balance: {Encoding.UTF8.GetString(getResult.Value!.Value.Span)}");
+
+// Example 2: Batch operation with immediate persistence
+Console.WriteLine("\n=== Batch Operation ===");
+
+var batchUpdates = new[]
+{
+    SmtKeyValue.CreateUpdate(
+        Encoding.UTF8.GetBytes("user:charlie"),
+        Encoding.UTF8.GetBytes("balance:3000")
+    ),
+    SmtKeyValue.CreateUpdate(
+        Encoding.UTF8.GetBytes("user:diana"),
+        Encoding.UTF8.GetBytes("balance:4000")
+    ),
+    SmtKeyValue.CreateDelete(Encoding.UTF8.GetBytes("user:bob"))
+};
+
+var batchResult = await tree.BatchUpdateAsync(
+    batchUpdates,
+    currentRoot,
+    storage,  // reader
+    storage,  // writer - persists immediately
+    CancellationToken.None
+);
+
+currentRoot = batchResult.NewRootHash;
+Console.WriteLine($"Batch complete. Total nodes persisted: {batchResult.NodesToPersist.Count}");
+
+// Update current root
+await storage.UpdateCurrentRootAsync(currentRoot);
+
+// Verify bob was deleted
+var bobResult = await tree.GetAsync(key2, currentRoot, storage);
+Console.WriteLine($"Bob exists: {bobResult.Found}"); // Output: False
+
+// Verify diana was added
+var dianaKey = Encoding.UTF8.GetBytes("user:diana");
+var dianaResult = await tree.GetAsync(dianaKey, currentRoot, storage);
+Console.WriteLine($"Diana's balance: {Encoding.UTF8.GetString(dianaResult.Value!.Value.Span)}");
+```
+
 ## Metadata Structure
 
 The `SmtMetadata` class contains the following core components:
@@ -1153,30 +1484,212 @@ public class MyCustomAdapterTests
 
 ### Integration with SMT Core
 
-SMT core operations will use these interfaces exclusively:
+SMT core operations use the persistence interfaces exclusively. Here are complete examples:
+
+#### Example 1: Single Update with Manual Persistence
 
 ```csharp
-// Tree initialization
-var metadata = SmtMetadata.Create(hashFunction, 256);
-await metadataStore.StoreMetadataAsync(metadata);
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+using MerkleTree.Smt.Persistence;
 
-// Tree updates
-var nodesToWrite = ComputeUpdatedNodes(key, value);
-await nodeWriter.WriteBatchAsync(nodesToWrite);
-await metadataStore.UpdateCurrentRootAsync(newRootHash);
+// Setup
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+var storage = new InMemorySmtStorage();
 
-// Tree queries
-var currentRoot = await metadataStore.GetCurrentRootAsync();
-var proofNodes = await ReadProofPath(nodeReader, key, currentRoot);
+// Store tree metadata
+await storage.StoreMetadataAsync(tree.Metadata);
 
-// Snapshots
-await snapshotMgr.CreateSnapshotAsync("before-update", currentRoot);
-// ... make changes ...
-if (needsRollback)
+// Get current root (or start with empty tree)
+var currentRoot = await storage.GetCurrentRootAsync() 
+    ?? tree.ZeroHashes[tree.Depth];
+
+// Perform update
+var key = Encoding.UTF8.GetBytes("account:123");
+var value = Encoding.UTF8.GetBytes("balance:1000");
+var result = await tree.UpdateAsync(key, value, currentRoot, storage);
+
+// Persist the nodes returned by the operation
+await storage.WriteBatchAsync(result.NodesToPersist);
+await storage.UpdateCurrentRootAsync(result.NewRootHash);
+
+Console.WriteLine($"Updated tree. New root: {Convert.ToHexString(result.NewRootHash.Span)}");
+```
+
+#### Example 2: Batch Update with Immediate Persistence
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+using MerkleTree.Smt.Persistence;
+
+// Setup
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+var storage = new InMemorySmtStorage();
+
+await storage.StoreMetadataAsync(tree.Metadata);
+
+var currentRoot = await storage.GetCurrentRootAsync() 
+    ?? tree.ZeroHashes[tree.Depth];
+
+// Prepare batch updates
+var updates = new[]
 {
-    var previousRoot = await snapshotMgr.RestoreSnapshotAsync("before-update");
-    await metadataStore.UpdateCurrentRootAsync(previousRoot);
+    SmtKeyValue.CreateUpdate(
+        Encoding.UTF8.GetBytes("key1"),
+        Encoding.UTF8.GetBytes("value1")
+    ),
+    SmtKeyValue.CreateUpdate(
+        Encoding.UTF8.GetBytes("key2"),
+        Encoding.UTF8.GetBytes("value2")
+    ),
+    SmtKeyValue.CreateDelete(Encoding.UTF8.GetBytes("key3"))
+};
+
+// Batch operation persists nodes immediately via the writer
+var result = await tree.BatchUpdateAsync(
+    updates,
+    currentRoot,
+    storage,  // reader interface
+    storage,  // writer interface - persists nodes during operation
+    CancellationToken.None
+);
+
+// Just update the root (nodes are already persisted)
+await storage.UpdateCurrentRootAsync(result.NewRootHash);
+
+Console.WriteLine($"Batch complete. Root: {Convert.ToHexString(result.NewRootHash.Span)}");
+```
+
+#### Example 3: Query Operations
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+using MerkleTree.Smt.Persistence;
+
+// Setup (assume tree is already populated)
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+var storage = new InMemorySmtStorage();
+
+var currentRoot = await storage.GetCurrentRootAsync();
+
+// Get a value
+var key = Encoding.UTF8.GetBytes("account:123");
+var getResult = await tree.GetAsync(key, currentRoot.Value, storage);
+
+if (getResult.Found)
+{
+    Console.WriteLine($"Found: {Encoding.UTF8.GetString(getResult.Value!.Value.Span)}");
 }
+else
+{
+    Console.WriteLine("Key not found");
+}
+```
+
+#### Example 4: Using Snapshots for Rollback
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+using MerkleTree.Smt.Persistence;
+
+// Setup
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+var storage = new InMemorySmtStorage();
+
+var currentRoot = await storage.GetCurrentRootAsync();
+
+// Create snapshot before making changes
+await storage.CreateSnapshotAsync("before-batch", currentRoot.Value);
+
+try
+{
+    // Make changes
+    var updates = new[]
+    {
+        SmtKeyValue.CreateUpdate(key1, value1),
+        SmtKeyValue.CreateUpdate(key2, value2)
+    };
+    
+    var result = await tree.BatchUpdateAsync(
+        updates,
+        currentRoot.Value,
+        storage,
+        storage,
+        CancellationToken.None
+    );
+    
+    await storage.UpdateCurrentRootAsync(result.NewRootHash);
+    
+    // Validate changes
+    if (!await ValidateChanges(tree, storage, result.NewRootHash))
+    {
+        throw new InvalidOperationException("Validation failed");
+    }
+    
+    Console.WriteLine("Changes committed successfully");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Error occurred: {ex.Message}");
+    
+    // Rollback to snapshot
+    var previousRoot = await storage.RestoreSnapshotAsync("before-batch");
+    await storage.UpdateCurrentRootAsync(previousRoot);
+    
+    Console.WriteLine("Rolled back to previous state");
+}
+finally
+{
+    // Clean up snapshot
+    await storage.DeleteSnapshotAsync("before-batch");
+}
+```
+
+#### Example 5: Multiple Updates with Custom Persistence Strategy
+
+```csharp
+using MerkleTree.Hashing;
+using MerkleTree.Smt;
+using MerkleTree.Smt.Persistence;
+
+// Setup
+var hashFunction = new Sha256HashFunction();
+var tree = new SparseMerkleTree(hashFunction);
+var storage = new InMemorySmtStorage();
+
+var currentRoot = await storage.GetCurrentRootAsync() 
+    ?? tree.ZeroHashes[tree.Depth];
+
+// Collect multiple update results
+var allResults = new List<SmtUpdateResult>();
+var keyValues = GetKeyValuesFromSource();
+
+foreach (var kv in keyValues)
+{
+    var result = await tree.UpdateAsync(
+        kv.Key,
+        kv.Value,
+        currentRoot,
+        storage
+    );
+    
+    allResults.Add(result);
+    currentRoot = result.NewRootHash;
+}
+
+// Custom persistence: persist all nodes in one batch
+var allNodes = allResults.SelectMany(r => r.NodesToPersist).ToList();
+await storage.WriteBatchAsync(allNodes);
+await storage.UpdateCurrentRootAsync(currentRoot);
+
+Console.WriteLine($"Persisted {allNodes.Count} nodes from {allResults.Count} operations");
 ```
 
 ### Security Considerations

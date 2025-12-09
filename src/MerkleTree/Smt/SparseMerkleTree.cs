@@ -442,4 +442,444 @@ public sealed class SparseMerkleTree
 
         return new SmtInternalNode(leftHash, rightHash, nodeHash);
     }
+
+    /// <summary>
+    /// Gets the value associated with a key from the tree.
+    /// </summary>
+    /// <param name="key">The key to look up.</param>
+    /// <param name="rootHash">The root hash of the tree to query.</param>
+    /// <param name="nodeReader">The node reader for retrieving nodes from storage.</param>
+    /// <param name="cancellationToken">Optional cancellation token.</param>
+    /// <returns>A task that resolves to the get result.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="key"/> or <paramref name="rootHash"/> is empty.</exception>
+    /// <remarks>
+    /// <para>
+    /// This method traverses the tree from the root to find the leaf node containing
+    /// the specified key. It returns a result indicating whether the key was found
+    /// and provides the value if present.
+    /// </para>
+    /// <para>
+    /// The operation is read-only and does not modify the tree state.
+    /// </para>
+    /// </remarks>
+    public async Task<SmtGetResult> GetAsync(
+        byte[] key,
+        ReadOnlyMemory<byte> rootHash,
+        Persistence.ISmtNodeReader nodeReader,
+        CancellationToken cancellationToken = default)
+    {
+        if (key == null)
+            throw new ArgumentNullException(nameof(key));
+        
+        if (nodeReader == null)
+            throw new ArgumentNullException(nameof(nodeReader));
+
+        if (key.Length == 0)
+            throw new ArgumentException("Key cannot be empty.", nameof(key));
+
+        if (rootHash.IsEmpty)
+            throw new ArgumentException("Root hash cannot be empty.", nameof(rootHash));
+
+        // Get the bit path for the key
+        var bitPath = GetBitPath(key);
+        var keyHash = HashKey(key);
+
+        // Traverse the tree following the bit path
+        var currentHash = rootHash;
+        for (int level = 0; level <= Depth; level++)
+        {
+            // Check if we've reached an empty node (zero hash)
+            // At tree level `level` (0=root), we have a subtree of height (Depth-level)
+            // So we check against ZeroHashes[Depth-level]
+            if (level < Depth && currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
+            {
+                return SmtGetResult.CreateNotFound();
+            }
+
+            // Read the current node
+            var nodeBlob = await nodeReader.ReadNodeByHashAsync(currentHash, cancellationToken);
+            if (nodeBlob == null)
+            {
+                // Node not in storage - key not found
+                return SmtGetResult.CreateNotFound();
+            }
+
+            var node = SmtNodeSerializer.Deserialize(nodeBlob.SerializedNode);
+
+            // If we've reached a leaf, check if it matches our key
+            if (node.NodeType == SmtNodeType.Leaf)
+            {
+                var leafNode = (SmtLeafNode)node;
+                if (leafNode.KeyHash.Span.SequenceEqual(keyHash))
+                {
+                    return SmtGetResult.CreateFound(leafNode.Value);
+                }
+                // Key hash doesn't match - key not in tree
+                return SmtGetResult.CreateNotFound();
+            }
+
+            // Must be an internal node - follow the bit path
+            if (node.NodeType == SmtNodeType.Internal)
+            {
+                // If we've exhausted the bit path, we've gone too deep without finding a leaf
+                if (level >= Depth)
+                {
+                    return SmtGetResult.CreateNotFound();
+                }
+                
+                var internalNode = (SmtInternalNode)node;
+                currentHash = bitPath[level] ? internalNode.RightHash : internalNode.LeftHash;
+            }
+            else
+            {
+                // Empty node encountered
+                return SmtGetResult.CreateNotFound();
+            }
+        }
+
+        // Should not reach here if tree depth is correct
+        return SmtGetResult.CreateNotFound();
+    }
+
+    /// <summary>
+    /// Updates or inserts a key-value pair in the tree.
+    /// </summary>
+    /// <param name="key">The key to update or insert.</param>
+    /// <param name="value">The value to associate with the key.</param>
+    /// <param name="rootHash">The current root hash of the tree.</param>
+    /// <param name="nodeReader">The node reader for retrieving nodes from storage.</param>
+    /// <param name="cancellationToken">Optional cancellation token.</param>
+    /// <returns>A task that resolves to the update result containing the new root hash and nodes to persist.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="key"/>, <paramref name="value"/>, or <paramref name="rootHash"/> is empty.</exception>
+    /// <remarks>
+    /// <para>
+    /// This method creates a new leaf node and reconstructs the path from the leaf to the root
+    /// using copy-on-write semantics. Only the nodes along the update path are recreated.
+    /// </para>
+    /// <para>
+    /// The operation does not modify storage directly. Instead, it returns a list of nodes
+    /// that need to be persisted by the caller.
+    /// </para>
+    /// </remarks>
+    public async Task<SmtUpdateResult> UpdateAsync(
+        byte[] key,
+        byte[] value,
+        ReadOnlyMemory<byte> rootHash,
+        Persistence.ISmtNodeReader nodeReader,
+        CancellationToken cancellationToken = default)
+    {
+        if (key == null)
+            throw new ArgumentNullException(nameof(key));
+        
+        if (value == null)
+            throw new ArgumentNullException(nameof(value));
+        
+        if (nodeReader == null)
+            throw new ArgumentNullException(nameof(nodeReader));
+
+        if (key.Length == 0)
+            throw new ArgumentException("Key cannot be empty.", nameof(key));
+
+        if (value.Length == 0)
+            throw new ArgumentException("Value cannot be empty.", nameof(value));
+
+        if (rootHash.IsEmpty)
+            throw new ArgumentException("Root hash cannot be empty.", nameof(rootHash));
+
+        var nodesToPersist = new List<Persistence.SmtNodeBlob>();
+        var bitPath = GetBitPath(key);
+        var newLeaf = CreateLeafNode(key, value, includeOriginalKey: false);
+
+        // Add the new leaf to nodes to persist
+        var leafBlob = CreateNodeBlob(newLeaf, bitPath);
+        nodesToPersist.Add(leafBlob);
+
+        // Reconstruct the path from leaf to root
+        var newRootHash = await UpdatePathAsync(
+            bitPath,
+            newLeaf.Hash,
+            rootHash,
+            nodeReader,
+            nodesToPersist,
+            cancellationToken);
+
+        return new SmtUpdateResult(newRootHash, nodesToPersist);
+    }
+
+    /// <summary>
+    /// Deletes a key from the tree.
+    /// </summary>
+    /// <param name="key">The key to delete.</param>
+    /// <param name="rootHash">The current root hash of the tree.</param>
+    /// <param name="nodeReader">The node reader for retrieving nodes from storage.</param>
+    /// <param name="cancellationToken">Optional cancellation token.</param>
+    /// <returns>A task that resolves to the update result containing the new root hash and nodes to persist.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="key"/> or <paramref name="rootHash"/> is empty.</exception>
+    /// <remarks>
+    /// <para>
+    /// This method removes a key from the tree by replacing the leaf node with an empty node
+    /// and reconstructing the path using copy-on-write semantics.
+    /// </para>
+    /// <para>
+    /// If the key does not exist in the tree, the operation succeeds without changes
+    /// (idempotent deletion).
+    /// </para>
+    /// </remarks>
+    public async Task<SmtUpdateResult> DeleteAsync(
+        byte[] key,
+        ReadOnlyMemory<byte> rootHash,
+        Persistence.ISmtNodeReader nodeReader,
+        CancellationToken cancellationToken = default)
+    {
+        if (key == null)
+            throw new ArgumentNullException(nameof(key));
+        
+        if (nodeReader == null)
+            throw new ArgumentNullException(nameof(nodeReader));
+
+        if (key.Length == 0)
+            throw new ArgumentException("Key cannot be empty.", nameof(key));
+
+        if (rootHash.IsEmpty)
+            throw new ArgumentException("Root hash cannot be empty.", nameof(rootHash));
+
+        var nodesToPersist = new List<Persistence.SmtNodeBlob>();
+        var bitPath = GetBitPath(key);
+        var emptyNode = CreateEmptyNode(0);
+
+        // Reconstruct the path from empty node to root
+        var newRootHash = await UpdatePathAsync(
+            bitPath,
+            emptyNode.Hash,
+            rootHash,
+            nodeReader,
+            nodesToPersist,
+            cancellationToken);
+
+        return new SmtUpdateResult(newRootHash, nodesToPersist);
+    }
+
+    /// <summary>
+    /// Applies a batch of updates and deletes to the tree in a deterministic order.
+    /// </summary>
+    /// <param name="updates">The collection of key-value pairs to apply.</param>
+    /// <param name="rootHash">The current root hash of the tree.</param>
+    /// <param name="nodeReader">The node reader for retrieving nodes from storage.</param>
+    /// <param name="nodeWriter">The node writer for persisting nodes within the batch. Nodes are persisted immediately after each operation so they're available for subsequent operations in the batch.</param>
+    /// <param name="cancellationToken">Optional cancellation token.</param>
+    /// <returns>A task that resolves to the update result containing the new root hash and nodes to persist.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="updates"/>, <paramref name="nodeReader"/>, or <paramref name="nodeWriter"/> is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="rootHash"/> is empty.</exception>
+    /// <remarks>
+    /// <para>
+    /// This method processes multiple updates and deletes in a single batch operation.
+    /// The updates are sorted by key hash to ensure deterministic results regardless
+    /// of input order.
+    /// </para>
+    /// <para>
+    /// If multiple updates affect the same key, the last one in the sorted order wins.
+    /// This ensures deterministic conflict resolution.
+    /// </para>
+    /// <para>
+    /// The operation uses copy-on-write semantics. Nodes are persisted immediately after
+    /// each update via the <paramref name="nodeWriter"/>, ensuring subsequent updates in
+    /// the batch can read the newly created nodes. All nodes are also returned in the
+    /// result for tracking purposes.
+    /// </para>
+    /// </remarks>
+    public async Task<SmtUpdateResult> BatchUpdateAsync(
+        IEnumerable<SmtKeyValue> updates,
+        ReadOnlyMemory<byte> rootHash,
+        Persistence.ISmtNodeReader nodeReader,
+        Persistence.ISmtNodeWriter nodeWriter,
+        CancellationToken cancellationToken = default)
+    {
+        if (updates == null)
+            throw new ArgumentNullException(nameof(updates));
+        
+        if (nodeReader == null)
+            throw new ArgumentNullException(nameof(nodeReader));
+
+        if (nodeWriter == null)
+            throw new ArgumentNullException(nameof(nodeWriter));
+
+        if (rootHash.IsEmpty)
+            throw new ArgumentException("Root hash cannot be empty.", nameof(rootHash));
+
+        // Sort updates by key hash for deterministic ordering
+        var sortedUpdates = updates
+            .Select(kv => new
+            {
+                KeyValue = kv,
+                KeyHash = HashKey(kv.Key.ToArray()),
+                BitPath = GetBitPath(kv.Key.ToArray())
+            })
+            .OrderBy(x => BitConverter.ToString(x.KeyHash).Replace("-", ""))
+            .ToList();
+
+        // Build a dictionary to handle conflicts (last write wins)
+        var updatesByKey = new Dictionary<string, (SmtKeyValue KeyValue, bool[] BitPath)>();
+        foreach (var item in sortedUpdates)
+        {
+            var keyHashHex = BitConverter.ToString(item.KeyHash).Replace("-", "");
+            updatesByKey[keyHashHex] = (item.KeyValue, item.BitPath);
+        }
+
+        // Apply each update sequentially
+        var currentRootHash = rootHash;
+        var allNodesToPersist = new List<Persistence.SmtNodeBlob>();
+
+        foreach (var (keyValue, bitPath) in updatesByKey.Values)
+        {
+            SmtUpdateResult result;
+
+            if (keyValue.IsDelete)
+            {
+                result = await DeleteAsync(
+                    keyValue.Key.ToArray(),
+                    currentRootHash,
+                    nodeReader,
+                    cancellationToken);
+            }
+            else
+            {
+                result = await UpdateAsync(
+                    keyValue.Key.ToArray(),
+                    keyValue.Value!.Value.ToArray(),
+                    currentRootHash,
+                    nodeReader,
+                    cancellationToken);
+            }
+
+            currentRootHash = result.NewRootHash;
+            allNodesToPersist.AddRange(result.NodesToPersist);
+
+            // Persist nodes immediately so they're available for subsequent operations in this batch
+            await nodeWriter.WriteBatchAsync(result.NodesToPersist, cancellationToken);
+        }
+
+        return new SmtUpdateResult(currentRootHash, allNodesToPersist);
+    }
+
+    /// <summary>
+    /// Helper method to update the path from a leaf to the root.
+    /// </summary>
+    private async Task<ReadOnlyMemory<byte>> UpdatePathAsync(
+        bool[] bitPath,
+        ReadOnlyMemory<byte> leafHash,
+        ReadOnlyMemory<byte> rootHash,
+        Persistence.ISmtNodeReader nodeReader,
+        List<Persistence.SmtNodeBlob> nodesToPersist,
+        CancellationToken cancellationToken)
+    {
+        // First, traverse down from root to collect sibling hashes at each level
+        var siblings = new ReadOnlyMemory<byte>[Depth];
+        
+        // Check if tree is empty
+        bool treeIsEmpty = rootHash.Span.SequenceEqual(ZeroHashes[Depth]);
+        
+        if (!treeIsEmpty)
+        {
+            var traverseHash = rootHash;
+            
+            for (int level = 0; level < Depth; level++)
+            {
+                // Check if current node is a zero hash
+                // At tree level `level` (0=root), current node represents subtree of height (Depth-level)
+                if (traverseHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
+                {
+                    // Rest of path is empty
+                    // When building at level i (bottom up), sibling at i needs zero hash for height (Depth-1-i)
+                    for (int i = level; i < Depth; i++)
+                    {
+                        siblings[i] = ZeroHashes[Depth - 1 - i];
+                    }
+                    break;
+                }
+                
+                // Read the current node
+                var nodeBlob = await nodeReader.ReadNodeByHashAsync(traverseHash, cancellationToken);
+                if (nodeBlob == null)
+                {
+                    // Node not found - rest of path is empty
+                    for (int i = level; i < Depth; i++)
+                    {
+                        siblings[i] = ZeroHashes[Depth - 1 - i];
+                    }
+                    break;
+                }
+                
+                var node = SmtNodeSerializer.Deserialize(nodeBlob.SerializedNode);
+                
+                if (node.NodeType == SmtNodeType.Internal)
+                {
+                    var internalNode = (SmtInternalNode)node;
+                    // Get sibling hash (opposite of bit path direction)
+                    siblings[level] = bitPath[level] ? internalNode.LeftHash : internalNode.RightHash;
+                    // Move to child
+                    traverseHash = bitPath[level] ? internalNode.RightHash : internalNode.LeftHash;
+                }
+                else
+                {
+                    // Leaf or empty - rest of path uses zero hashes
+                    for (int i = level; i < Depth; i++)
+                    {
+                        siblings[i] = ZeroHashes[Depth - 1 - i];
+                    }
+                    break;
+                }
+            }
+        }
+        else
+        {
+            // Empty tree - all siblings are zero hashes
+            // When building at loop level `level` (Depth-1 down to 0),
+            // At level (Depth-1), we create a node just above the leaf, sibling is height 0
+            // At level 0 (root), we create the root, sibling is height (Depth-1)
+            // So: siblings[level] = ZeroHashes[Depth - 1 - level]
+            for (int level = 0; level < Depth; level++)
+            {
+                siblings[level] = ZeroHashes[Depth - 1 - level];
+            }
+        }
+        
+        // Now reconstruct from leaf to root
+        var currentHash = leafHash;
+        
+        for (int level = Depth - 1; level >= 0; level--)
+        {
+            var siblingHash = siblings[level];
+            var goRight = bitPath[level];
+            
+            // Create new internal node
+            var leftHash = goRight ? siblingHash.ToArray() : currentHash.ToArray();
+            var rightHash = goRight ? currentHash.ToArray() : siblingHash.ToArray();
+            var newInternal = CreateInternalNode(leftHash, rightHash);
+            
+            // Add to nodes to persist
+            var internalPath = new bool[level + 1];
+            Array.Copy(bitPath, 0, internalPath, 0, level + 1);
+            var internalBlob = CreateNodeBlob(newInternal, internalPath);
+            nodesToPersist.Add(internalBlob);
+            
+            currentHash = newInternal.Hash;
+        }
+        
+        return currentHash;
+    }
+
+    /// <summary>
+    /// Helper method to create a node blob from an SMT node.
+    /// </summary>
+    private Persistence.SmtNodeBlob CreateNodeBlob(SmtNode node, bool[] path)
+    {
+        var serializedNode = SmtNodeSerializer.Serialize(node);
+        return Persistence.SmtNodeBlob.CreateWithPath(
+            node.Hash,
+            serializedNode,
+            new ReadOnlyMemory<bool>(path));
+    }
 }
