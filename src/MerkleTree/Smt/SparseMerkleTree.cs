@@ -882,4 +882,370 @@ public sealed class SparseMerkleTree
             serializedNode,
             new ReadOnlyMemory<bool>(path));
     }
+
+    /// <summary>
+    /// Generates an inclusion proof for a key in the tree.
+    /// </summary>
+    /// <param name="key">The key to generate a proof for.</param>
+    /// <param name="rootHash">The root hash of the tree.</param>
+    /// <param name="nodeReader">The node reader for retrieving nodes from storage.</param>
+    /// <param name="compress">Whether to compress the proof by omitting zero-hash siblings.</param>
+    /// <param name="cancellationToken">Optional cancellation token.</param>
+    /// <returns>An inclusion proof for the key, or null if the key is not in the tree.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when key or root hash is empty.</exception>
+    /// <remarks>
+    /// <para>
+    /// This method traverses the tree from root to leaf, collecting sibling hashes
+    /// along the path. The resulting proof can be used to verify that the key-value
+    /// pair exists in the tree without requiring access to the entire tree.
+    /// </para>
+    /// <para>
+    /// If compression is enabled, zero-hash siblings are omitted from the proof and
+    /// tracked using a bitmask. This reduces proof size for sparse trees.
+    /// </para>
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var proof = await smt.GenerateInclusionProofAsync(key, rootHash, storage);
+    /// if (proof != null)
+    /// {
+    ///     bool isValid = proof.Verify(rootHash, hashFunction, zeroHashes);
+    /// }
+    /// </code>
+    /// </example>
+    public async Task<Proofs.SmtInclusionProof?> GenerateInclusionProofAsync(
+        byte[] key,
+        ReadOnlyMemory<byte> rootHash,
+        Persistence.ISmtNodeReader nodeReader,
+        bool compress = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (key == null)
+            throw new ArgumentNullException(nameof(key));
+        if (nodeReader == null)
+            throw new ArgumentNullException(nameof(nodeReader));
+
+        if (key.Length == 0)
+            throw new ArgumentException("Key cannot be empty.", nameof(key));
+
+        if (rootHash.IsEmpty)
+            throw new ArgumentException("Root hash cannot be empty.", nameof(rootHash));
+
+        // Get the bit path and key hash for the key
+        var bitPath = GetBitPath(key);
+        var keyHash = HashKey(key);
+
+        // Collect sibling hashes along the path
+        var siblings = new List<byte[]>();
+        var bitmask = new byte[(Depth + 7) / 8];
+
+        // Traverse the tree following the bit path
+        var currentHash = rootHash;
+        for (int level = 0; level < Depth; level++)
+        {
+            // Check if we've reached an empty node (zero hash)
+            if (currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
+            {
+                // Key not found - empty path
+                return null;
+            }
+
+            // Read the current node
+            var nodeBlob = await nodeReader.ReadNodeByHashAsync(currentHash, cancellationToken);
+            if (nodeBlob == null)
+            {
+                // Node not in storage - key not found
+                return null;
+            }
+
+            var node = SmtNodeSerializer.Deserialize(nodeBlob.SerializedNode);
+
+            // If we've reached a leaf, check if it matches our key
+            if (node.NodeType == SmtNodeType.Leaf)
+            {
+                var leafNode = (SmtLeafNode)node;
+                if (!leafNode.KeyHash.Span.SequenceEqual(keyHash))
+                {
+                    // Key hash doesn't match - key not in tree
+                    return null;
+                }
+
+                // Found the leaf! The remaining siblings are zero-hashes
+                for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
+                {
+                    var zeroHash = ZeroHashes[remainingLevel];
+                    if (compress && IsZeroHash(ZeroHashes[remainingLevel], remainingLevel))
+                    {
+                        // Omit zero-hash (bit already 0 in bitmask)
+                    }
+                    else
+                    {
+                        siblings.Add(zeroHash);
+                        Proofs.SmtProof.SetBit(bitmask, remainingLevel, true);
+                    }
+                }
+
+                // Create the proof
+                return new Proofs.SmtInclusionProof(
+                    keyHash,
+                    leafNode.Value.ToArray(),
+                    Depth,
+                    HashAlgorithmId,
+                    siblings.ToArray(),
+                    bitmask,
+                    compress);
+            }
+
+            // Must be an internal node - get sibling and continue
+            if (node.NodeType == SmtNodeType.Internal)
+            {
+                var internalNode = (SmtInternalNode)node;
+                
+                // Determine which child to follow and which is the sibling
+                bool goRight = bitPath[level];
+                var siblingHash = goRight ? internalNode.LeftHash.ToArray() : internalNode.RightHash.ToArray();
+                
+                // Check if sibling is a zero-hash
+                if (compress && IsZeroHash(siblingHash, level))
+                {
+                    // Omit zero-hash (bit already 0 in bitmask)
+                }
+                else
+                {
+                    siblings.Add(siblingHash);
+                    Proofs.SmtProof.SetBit(bitmask, level, true);
+                }
+
+                // Move to the next level
+                currentHash = goRight ? internalNode.RightHash : internalNode.LeftHash;
+            }
+            else
+            {
+                // Empty node encountered - key not found
+                return null;
+            }
+        }
+
+        // If we reach here, we've traversed all levels without finding the leaf
+        // This shouldn't happen in a properly structured tree
+        return null;
+    }
+
+    /// <summary>
+    /// Generates a non-inclusion proof for a key that is not in the tree.
+    /// </summary>
+    /// <param name="key">The key to generate a proof for.</param>
+    /// <param name="rootHash">The root hash of the tree.</param>
+    /// <param name="nodeReader">The node reader for retrieving nodes from storage.</param>
+    /// <param name="compress">Whether to compress the proof by omitting zero-hash siblings.</param>
+    /// <param name="cancellationToken">Optional cancellation token.</param>
+    /// <returns>A non-inclusion proof for the key, or null if the key is in the tree.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null.</exception>
+    /// <exception cref="ArgumentException">Thrown when key or root hash is empty.</exception>
+    /// <remarks>
+    /// <para>
+    /// This method generates a proof that a key does not exist in the tree.
+    /// Two types of proofs can be generated:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description><strong>Empty Path:</strong> The path to the key leads to an empty subtree.</description></item>
+    /// <item><description><strong>Leaf Mismatch:</strong> The path leads to a leaf with a different key hash.</description></item>
+    /// </list>
+    /// <para>
+    /// If compression is enabled, zero-hash siblings are omitted from the proof.
+    /// </para>
+    /// </remarks>
+    public async Task<Proofs.SmtNonInclusionProof?> GenerateNonInclusionProofAsync(
+        byte[] key,
+        ReadOnlyMemory<byte> rootHash,
+        Persistence.ISmtNodeReader nodeReader,
+        bool compress = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (key == null)
+            throw new ArgumentNullException(nameof(key));
+        if (nodeReader == null)
+            throw new ArgumentNullException(nameof(nodeReader));
+
+        if (key.Length == 0)
+            throw new ArgumentException("Key cannot be empty.", nameof(key));
+
+        if (rootHash.IsEmpty)
+            throw new ArgumentException("Root hash cannot be empty.", nameof(rootHash));
+
+        // Get the bit path and key hash for the key
+        var bitPath = GetBitPath(key);
+        var keyHash = HashKey(key);
+
+        // Collect sibling hashes along the path
+        var siblings = new List<byte[]>();
+        var bitmask = new byte[(Depth + 7) / 8];
+
+        // Traverse the tree following the bit path
+        var currentHash = rootHash;
+        for (int level = 0; level < Depth; level++)
+        {
+            // Check if we've reached an empty node (zero hash)
+            if (currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
+            {
+                // Found empty path - collect remaining zero-hash siblings
+                for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
+                {
+                    var zeroHash = ZeroHashes[remainingLevel];
+                    if (compress && IsZeroHash(zeroHash, remainingLevel))
+                    {
+                        // Omit zero-hash (bit already 0 in bitmask)
+                    }
+                    else
+                    {
+                        siblings.Add(zeroHash);
+                        Proofs.SmtProof.SetBit(bitmask, remainingLevel, true);
+                    }
+                }
+
+                // Create empty path proof
+                return new Proofs.SmtNonInclusionProof(
+                    keyHash,
+                    Depth,
+                    HashAlgorithmId,
+                    siblings.ToArray(),
+                    bitmask,
+                    compress,
+                    Proofs.NonInclusionProofType.EmptyPath);
+            }
+
+            // Read the current node
+            var nodeBlob = await nodeReader.ReadNodeByHashAsync(currentHash, cancellationToken);
+            if (nodeBlob == null)
+            {
+                // Node not in storage - treat as empty path
+                for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
+                {
+                    var zeroHash = ZeroHashes[remainingLevel];
+                    if (compress && IsZeroHash(zeroHash, remainingLevel))
+                    {
+                        // Omit zero-hash
+                    }
+                    else
+                    {
+                        siblings.Add(zeroHash);
+                        Proofs.SmtProof.SetBit(bitmask, remainingLevel, true);
+                    }
+                }
+
+                return new Proofs.SmtNonInclusionProof(
+                    keyHash,
+                    Depth,
+                    HashAlgorithmId,
+                    siblings.ToArray(),
+                    bitmask,
+                    compress,
+                    Proofs.NonInclusionProofType.EmptyPath);
+            }
+
+            var node = SmtNodeSerializer.Deserialize(nodeBlob.SerializedNode);
+
+            // If we've reached a leaf, check if it matches our key
+            if (node.NodeType == SmtNodeType.Leaf)
+            {
+                var leafNode = (SmtLeafNode)node;
+                if (leafNode.KeyHash.Span.SequenceEqual(keyHash))
+                {
+                    // Key exists in the tree - cannot generate non-inclusion proof
+                    return null;
+                }
+
+                // Key hash doesn't match - this is a leaf mismatch proof
+                // Collect remaining zero-hash siblings
+                for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
+                {
+                    var zeroHash = ZeroHashes[remainingLevel];
+                    if (compress && IsZeroHash(zeroHash, remainingLevel))
+                    {
+                        // Omit zero-hash
+                    }
+                    else
+                    {
+                        siblings.Add(zeroHash);
+                        Proofs.SmtProof.SetBit(bitmask, remainingLevel, true);
+                    }
+                }
+
+                // Create leaf mismatch proof
+                return new Proofs.SmtNonInclusionProof(
+                    keyHash,
+                    Depth,
+                    HashAlgorithmId,
+                    siblings.ToArray(),
+                    bitmask,
+                    compress,
+                    Proofs.NonInclusionProofType.LeafMismatch,
+                    leafNode.KeyHash.ToArray(),
+                    leafNode.Value.ToArray());
+            }
+
+            // Must be an internal node - get sibling and continue
+            if (node.NodeType == SmtNodeType.Internal)
+            {
+                var internalNode = (SmtInternalNode)node;
+                
+                // Determine which child to follow and which is the sibling
+                bool goRight = bitPath[level];
+                var siblingHash = goRight ? internalNode.LeftHash.ToArray() : internalNode.RightHash.ToArray();
+                
+                // Check if sibling is a zero-hash
+                if (compress && IsZeroHash(siblingHash, level))
+                {
+                    // Omit zero-hash (bit already 0 in bitmask)
+                }
+                else
+                {
+                    siblings.Add(siblingHash);
+                    Proofs.SmtProof.SetBit(bitmask, level, true);
+                }
+
+                // Move to the next level
+                currentHash = goRight ? internalNode.RightHash : internalNode.LeftHash;
+            }
+            else
+            {
+                // Empty node - treat as empty path
+                for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
+                {
+                    var zeroHash = ZeroHashes[remainingLevel];
+                    if (compress && IsZeroHash(zeroHash, remainingLevel))
+                    {
+                        // Omit zero-hash
+                    }
+                    else
+                    {
+                        siblings.Add(zeroHash);
+                        Proofs.SmtProof.SetBit(bitmask, remainingLevel, true);
+                    }
+                }
+
+                return new Proofs.SmtNonInclusionProof(
+                    keyHash,
+                    Depth,
+                    HashAlgorithmId,
+                    siblings.ToArray(),
+                    bitmask,
+                    compress,
+                    Proofs.NonInclusionProofType.EmptyPath);
+            }
+        }
+
+        // If we reach here, we've traversed all levels without finding a conclusive result
+        // This shouldn't happen in a properly structured tree
+        return null;
+    }
+
+    /// <summary>
+    /// Checks if a hash matches the zero-hash for the specified level.
+    /// </summary>
+    private bool IsZeroHash(byte[] hash, int level)
+    {
+        return hash.SequenceEqual(ZeroHashes[level]);
+    }
 }
