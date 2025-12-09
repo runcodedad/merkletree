@@ -487,12 +487,12 @@ public sealed class SparseMerkleTree
 
         // Traverse the tree following the bit path
         var currentHash = rootHash;
-        for (int level = 0; level < Depth; level++)
+        for (int level = 0; level <= Depth; level++)
         {
             // Check if we've reached an empty node (zero hash)
             // At tree level `level` (0=root), we have a subtree of height (Depth-level)
             // So we check against ZeroHashes[Depth-level]
-            if (currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
+            if (level < Depth && currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
             {
                 return SmtGetResult.CreateNotFound();
             }
@@ -522,6 +522,12 @@ public sealed class SparseMerkleTree
             // Must be an internal node - follow the bit path
             if (node.NodeType == SmtNodeType.Internal)
             {
+                // If we've exhausted the bit path, we've gone too deep without finding a leaf
+                if (level >= Depth)
+                {
+                    return SmtGetResult.CreateNotFound();
+                }
+                
                 var internalNode = (SmtInternalNode)node;
                 currentHash = bitPath[level] ? internalNode.RightHash : internalNode.LeftHash;
             }
@@ -662,9 +668,10 @@ public sealed class SparseMerkleTree
     /// <param name="updates">The collection of key-value pairs to apply.</param>
     /// <param name="rootHash">The current root hash of the tree.</param>
     /// <param name="nodeReader">The node reader for retrieving nodes from storage.</param>
+    /// <param name="nodeWriter">The node writer for persisting nodes within the batch. Nodes are persisted immediately after each operation so they're available for subsequent operations in the batch.</param>
     /// <param name="cancellationToken">Optional cancellation token.</param>
     /// <returns>A task that resolves to the update result containing the new root hash and nodes to persist.</returns>
-    /// <exception cref="ArgumentNullException">Thrown when any parameter is null.</exception>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="updates"/>, <paramref name="nodeReader"/>, or <paramref name="nodeWriter"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="rootHash"/> is empty.</exception>
     /// <remarks>
     /// <para>
@@ -677,14 +684,17 @@ public sealed class SparseMerkleTree
     /// This ensures deterministic conflict resolution.
     /// </para>
     /// <para>
-    /// The operation uses copy-on-write semantics and returns all nodes that need to
-    /// be persisted.
+    /// The operation uses copy-on-write semantics. Nodes are persisted immediately after
+    /// each update via the <paramref name="nodeWriter"/>, ensuring subsequent updates in
+    /// the batch can read the newly created nodes. All nodes are also returned in the
+    /// result for tracking purposes.
     /// </para>
     /// </remarks>
     public async Task<SmtUpdateResult> BatchUpdateAsync(
         IEnumerable<SmtKeyValue> updates,
         ReadOnlyMemory<byte> rootHash,
         Persistence.ISmtNodeReader nodeReader,
+        Persistence.ISmtNodeWriter nodeWriter,
         CancellationToken cancellationToken = default)
     {
         if (updates == null)
@@ -692,6 +702,9 @@ public sealed class SparseMerkleTree
         
         if (nodeReader == null)
             throw new ArgumentNullException(nameof(nodeReader));
+
+        if (nodeWriter == null)
+            throw new ArgumentNullException(nameof(nodeWriter));
 
         if (rootHash.IsEmpty)
             throw new ArgumentException("Root hash cannot be empty.", nameof(rootHash));
@@ -743,6 +756,9 @@ public sealed class SparseMerkleTree
 
             currentRootHash = result.NewRootHash;
             allNodesToPersist.AddRange(result.NodesToPersist);
+
+            // Persist nodes immediately so they're available for subsequent operations in this batch
+            await nodeWriter.WriteBatchAsync(result.NodesToPersist, cancellationToken);
         }
 
         return new SmtUpdateResult(currentRootHash, allNodesToPersist);
@@ -776,10 +792,10 @@ public sealed class SparseMerkleTree
                 if (traverseHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
                 {
                     // Rest of path is empty
-                    // When building at level i, sibling is at height i
+                    // When building at level i (bottom up), sibling at i needs zero hash for height (Depth-1-i)
                     for (int i = level; i < Depth; i++)
                     {
-                        siblings[i] = ZeroHashes[i];
+                        siblings[i] = ZeroHashes[Depth - 1 - i];
                     }
                     break;
                 }
@@ -791,7 +807,7 @@ public sealed class SparseMerkleTree
                     // Node not found - rest of path is empty
                     for (int i = level; i < Depth; i++)
                     {
-                        siblings[i] = ZeroHashes[i];
+                        siblings[i] = ZeroHashes[Depth - 1 - i];
                     }
                     break;
                 }
@@ -811,7 +827,7 @@ public sealed class SparseMerkleTree
                     // Leaf or empty - rest of path uses zero hashes
                     for (int i = level; i < Depth; i++)
                     {
-                        siblings[i] = ZeroHashes[i];
+                        siblings[i] = ZeroHashes[Depth - 1 - i];
                     }
                     break;
                 }
@@ -821,11 +837,12 @@ public sealed class SparseMerkleTree
         {
             // Empty tree - all siblings are zero hashes
             // When building at loop level `level` (Depth-1 down to 0),
-            // we're creating an internal node at tree height (level+1)
-            // The sibling should be an empty subtree of height level
+            // At level (Depth-1), we create a node just above the leaf, sibling is height 0
+            // At level 0 (root), we create the root, sibling is height (Depth-1)
+            // So: siblings[level] = ZeroHashes[Depth - 1 - level]
             for (int level = 0; level < Depth; level++)
             {
-                siblings[level] = ZeroHashes[level];
+                siblings[level] = ZeroHashes[Depth - 1 - level];
             }
         }
         

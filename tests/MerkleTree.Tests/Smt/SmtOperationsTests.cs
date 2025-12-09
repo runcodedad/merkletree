@@ -1,8 +1,4 @@
-using System;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
-using Xunit;
 using MerkleTree.Hashing;
 using MerkleTree.Smt;
 using MerkleTree.Smt.Persistence;
@@ -60,7 +56,7 @@ public class SmtOperationsTests
         // Assert
         Assert.True(getResult.Found);
         Assert.NotNull(getResult.Value);
-        Assert.True(getResult.Value.Value.Span.SequenceEqual(value));
+        Assert.True(getResult.Value!.Value.Span.SequenceEqual(value));
     }
 
     [Fact]
@@ -312,7 +308,7 @@ public class SmtOperationsTests
         var updates = Array.Empty<SmtKeyValue>();
 
         // Act
-        var result = await _smt.BatchUpdateAsync(updates, emptyRoot, _storage);
+        var result = await _smt.BatchUpdateAsync(updates, emptyRoot, _storage, _storage);
 
         // Assert
         Assert.NotNull(result);
@@ -332,7 +328,7 @@ public class SmtOperationsTests
         };
 
         // Act
-        var result = await _smt.BatchUpdateAsync(updates, emptyRoot, _storage);
+        var result = await _smt.BatchUpdateAsync(updates, emptyRoot, _storage, _storage);
         await _storage.WriteBatchAsync(result.NodesToPersist);
 
         // Assert - all keys are retrievable
@@ -357,7 +353,7 @@ public class SmtOperationsTests
             SmtKeyValue.CreateUpdate(Encoding.UTF8.GetBytes("key1"), Encoding.UTF8.GetBytes("value1")),
             SmtKeyValue.CreateUpdate(Encoding.UTF8.GetBytes("key2"), Encoding.UTF8.GetBytes("value2"))
         };
-        var initialResult = await _smt.BatchUpdateAsync(initialUpdates, emptyRoot, _storage);
+        var initialResult = await _smt.BatchUpdateAsync(initialUpdates, emptyRoot, _storage, _storage);
         await _storage.WriteBatchAsync(initialResult.NodesToPersist);
 
         // Batch with mix of updates and deletes
@@ -368,7 +364,7 @@ public class SmtOperationsTests
         };
 
         // Act
-        var result = await _smt.BatchUpdateAsync(mixedUpdates, initialResult.NewRootHash, _storage);
+        var result = await _smt.BatchUpdateAsync(mixedUpdates, initialResult.NewRootHash, _storage, _storage);
         await _storage.WriteBatchAsync(result.NodesToPersist);
 
         // Assert
@@ -402,10 +398,10 @@ public class SmtOperationsTests
         };
 
         // Act
-        var result1 = await _smt.BatchUpdateAsync(updates1, emptyRoot, _storage);
+        var result1 = await _smt.BatchUpdateAsync(updates1, emptyRoot, _storage, _storage);
         
         var storage2 = new InMemorySmtStorage();
-        var result2 = await _smt.BatchUpdateAsync(updates2, emptyRoot, storage2);
+        var result2 = await _smt.BatchUpdateAsync(updates2, emptyRoot, storage2, storage2);
 
         // Assert - roots should be identical
         Assert.True(result1.NewRootHash.Span.SequenceEqual(result2.NewRootHash.Span));
@@ -427,7 +423,7 @@ public class SmtOperationsTests
         };
 
         // Act
-        var result = await _smt.BatchUpdateAsync(updates, emptyRoot, _storage);
+        var result = await _smt.BatchUpdateAsync(updates, emptyRoot, _storage, _storage);
         await _storage.WriteBatchAsync(result.NodesToPersist);
 
         // Assert - should have the last value (deterministic ordering)
@@ -445,7 +441,7 @@ public class SmtOperationsTests
 
         // Act & Assert
         await Assert.ThrowsAsync<ArgumentNullException>(
-            async () => await _smt.BatchUpdateAsync(null!, emptyRoot, _storage));
+            async () => await _smt.BatchUpdateAsync(null!, emptyRoot, _storage, _storage));
     }
 
     #endregion
