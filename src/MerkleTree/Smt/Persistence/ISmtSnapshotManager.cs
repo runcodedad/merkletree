@@ -151,7 +151,7 @@ public interface ISmtSnapshotManager
     /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="snapshotName"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="snapshotName"/> is empty.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the snapshot does not exist or an adapter-level error occurs.</exception>
+    /// <exception cref="MerkleTree.Exceptions.StorageAdapterException">Thrown when the snapshot does not exist or an adapter-level error occurs.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>
