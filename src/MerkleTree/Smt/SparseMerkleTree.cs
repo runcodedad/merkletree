@@ -971,11 +971,11 @@ public sealed class SparseMerkleTree
                     return null;
                 }
 
-                // Found the leaf! The remaining siblings are zero-hashes
+                // Found the leaf! Add remaining zero-hash siblings for remaining depth
                 for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
                 {
                     var zeroHash = ZeroHashes[remainingLevel];
-                    if (compress && IsZeroHash(ZeroHashes[remainingLevel], remainingLevel))
+                    if (compress && IsZeroHash(zeroHash, remainingLevel))
                     {
                         // Omit zero-hash (bit already 0 in bitmask)
                     }
@@ -1089,7 +1089,7 @@ public sealed class SparseMerkleTree
             // Check if we've reached an empty node (zero hash)
             if (currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
             {
-                // Found empty path - collect remaining zero-hash siblings
+                // Found empty path - add remaining zero-hash siblings
                 for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
                 {
                     var zeroHash = ZeroHashes[remainingLevel];
@@ -1120,6 +1120,7 @@ public sealed class SparseMerkleTree
             if (nodeBlob == null)
             {
                 // Node not in storage - treat as empty path
+                // Add remaining zero-hash siblings
                 for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
                 {
                     var zeroHash = ZeroHashes[remainingLevel];
@@ -1157,7 +1158,7 @@ public sealed class SparseMerkleTree
                 }
 
                 // Key hash doesn't match - this is a leaf mismatch proof
-                // Collect remaining zero-hash siblings
+                // Add remaining zero-hash siblings
                 for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
                 {
                     var zeroHash = ZeroHashes[remainingLevel];
@@ -1211,6 +1212,7 @@ public sealed class SparseMerkleTree
             else
             {
                 // Empty node - treat as empty path
+                // Add remaining zero-hash siblings
                 for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
                 {
                     var zeroHash = ZeroHashes[remainingLevel];
