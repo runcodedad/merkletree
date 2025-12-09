@@ -1,3 +1,5 @@
+using MerkleTree.Exceptions;
+
 namespace MerkleTree.Smt.Persistence;
 
 /// <summary>
@@ -21,8 +23,8 @@ namespace MerkleTree.Smt.Persistence;
 /// </list>
 /// <para><strong>Error Handling:</strong></para>
 /// <para>
-/// Implementations should throw exceptions for adapter-level errors (I/O failures, network issues, etc.).
-/// These exceptions will be surfaced to the caller for appropriate handling.
+/// Implementations should wrap storage-level errors (I/O failures, network issues, database errors, etc.)
+/// in <see cref="StorageAdapterException"/> to provide consistent error reporting.
 /// Duplicate writes should be handled gracefully without errors.
 /// </para>
 /// </remarks>
@@ -36,7 +38,7 @@ public interface ISmtNodeWriter
     /// <returns>A task that completes when all nodes have been written.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="nodes"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="nodes"/> contains invalid data.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when an adapter-level error occurs (I/O failure, insufficient space, etc.).</exception>
+    /// <exception cref="StorageAdapterException">Thrown when an adapter-level error occurs (I/O failure, database error, insufficient space, etc.).</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>

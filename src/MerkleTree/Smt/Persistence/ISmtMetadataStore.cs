@@ -1,3 +1,5 @@
+using MerkleTree.Exceptions;
+
 namespace MerkleTree.Smt.Persistence;
 
 /// <summary>
@@ -41,7 +43,7 @@ public interface ISmtMetadataStore
     /// <param name="cancellationToken">Optional cancellation token.</param>
     /// <returns>A task that completes when the metadata has been stored.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="metadata"/> is null.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when an adapter-level error occurs (I/O failure, insufficient space, etc.).</exception>
+    /// <exception cref="StorageAdapterException">Thrown when an adapter-level error occurs (I/O failure, insufficient space, etc.).</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>
@@ -83,7 +85,7 @@ public interface ISmtMetadataStore
     /// <returns>
     /// A task that resolves to the stored metadata, or null if no metadata exists.
     /// </returns>
-    /// <exception cref="InvalidOperationException">Thrown when an adapter-level error occurs or metadata is corrupted.</exception>
+    /// <exception cref="StorageAdapterException">Thrown when an adapter-level error occurs or metadata is corrupted.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>
@@ -119,7 +121,7 @@ public interface ISmtMetadataStore
     /// <returns>A task that completes when the root hash has been updated.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="rootHash"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="rootHash"/> is empty.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when metadata doesn't exist or an adapter-level error occurs.</exception>
+    /// <exception cref="StorageAdapterException">Thrown when metadata doesn't exist or an adapter-level error occurs.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>
@@ -137,7 +139,7 @@ public interface ISmtMetadataStore
     /// should not cause errors.
     /// </para>
     /// <para>
-    /// If metadata doesn't exist, throws <see cref="InvalidOperationException"/>.
+    /// If metadata doesn't exist, throws <see cref="StorageAdapterException"/>.
     /// Callers should ensure metadata is stored before updating the root hash.
     /// </para>
     /// </remarks>
@@ -152,7 +154,7 @@ public interface ISmtMetadataStore
     /// <returns>
     /// A task that resolves to the current root hash, or null if no root has been set.
     /// </returns>
-    /// <exception cref="InvalidOperationException">Thrown when an adapter-level error occurs.</exception>
+    /// <exception cref="StorageAdapterException">Thrown when an adapter-level error occurs.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>
@@ -179,7 +181,7 @@ public interface ISmtMetadataStore
     /// <returns>
     /// A task that resolves to true if metadata exists, false otherwise.
     /// </returns>
-    /// <exception cref="InvalidOperationException">Thrown when an adapter-level error occurs.</exception>
+    /// <exception cref="StorageAdapterException">Thrown when an adapter-level error occurs.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>
