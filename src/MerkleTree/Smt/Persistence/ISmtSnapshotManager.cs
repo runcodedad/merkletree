@@ -45,7 +45,7 @@ public interface ISmtSnapshotManager
     /// <returns>A task that completes when the snapshot has been created.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="snapshotName"/> or <paramref name="rootHash"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="snapshotName"/> is empty or <paramref name="rootHash"/> is empty.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when an adapter-level error occurs or snapshot name already exists (if implementation doesn't allow overwrites).</exception>
+    /// <exception cref="MerkleTree.Exceptions.StorageAdapterException">Thrown when an adapter-level error occurs or snapshot name already exists (if implementation doesn't allow overwrites).</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>
@@ -81,7 +81,7 @@ public interface ISmtSnapshotManager
     /// </returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="snapshotName"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="snapshotName"/> is empty.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when an adapter-level error occurs.</exception>
+    /// <exception cref="MerkleTree.Exceptions.StorageAdapterException">Thrown when an adapter-level error occurs.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>
@@ -100,7 +100,7 @@ public interface ISmtSnapshotManager
     /// <returns>
     /// A task that resolves to a collection of all snapshot names.
     /// </returns>
-    /// <exception cref="InvalidOperationException">Thrown when an adapter-level error occurs.</exception>
+    /// <exception cref="MerkleTree.Exceptions.StorageAdapterException">Thrown when an adapter-level error occurs.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>
@@ -123,7 +123,7 @@ public interface ISmtSnapshotManager
     /// <returns>A task that completes when the snapshot has been deleted.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="snapshotName"/> is null.</exception>
     /// <exception cref="ArgumentException">Thrown when <paramref name="snapshotName"/> is empty.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when an adapter-level error occurs.</exception>
+    /// <exception cref="MerkleTree.Exceptions.StorageAdapterException">Thrown when an adapter-level error occurs.</exception>
     /// <exception cref="OperationCanceledException">Thrown when the operation is canceled via <paramref name="cancellationToken"/>.</exception>
     /// <remarks>
     /// <para>
@@ -163,7 +163,7 @@ public interface ISmtSnapshotManager
     /// the root hash that can be used to access the snapshot's tree state.
     /// </para>
     /// <para>
-    /// If the snapshot does not exist, throws <see cref="InvalidOperationException"/>.
+    /// If the snapshot does not exist, throws <see cref="MerkleTree.Exceptions.StorageAdapterException"/>.
     /// </para>
     /// </remarks>
     Task<ReadOnlyMemory<byte>> RestoreSnapshotAsync(
