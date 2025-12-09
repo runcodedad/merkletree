@@ -942,10 +942,10 @@ public sealed class SparseMerkleTree
 
         // Traverse the tree following the bit path
         var currentHash = rootHash;
-        for (int level = 0; level < Depth; level++)
+        for (int level = 0; level <= Depth; level++)
         {
             // Check if we've reached an empty node (zero hash)
-            if (currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
+            if (level < Depth && currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
             {
                 // Key not found - empty path
                 return null;
@@ -971,19 +971,18 @@ public sealed class SparseMerkleTree
                     return null;
                 }
 
-                // Found the leaf! Add remaining zero-hash siblings for remaining depth
+                // Found the leaf! We've collected all siblings along the path.
+                // For uncompressed proofs, we need to pad with zero-hashes to reach Depth siblings
                 for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
                 {
                     var zeroHash = ZeroHashes[remainingLevel];
-                    if (compress && IsZeroHash(zeroHash, remainingLevel))
+                    if (!compress)
                     {
-                        // Omit zero-hash (bit already 0 in bitmask)
-                    }
-                    else
-                    {
+                        // Always add zero-hashes for uncompressed proofs
                         siblings.Add(zeroHash);
                         Proofs.SmtProof.SetBit(bitmask, remainingLevel, true);
                     }
+                    // For compressed proofs, omit zero-hashes (bit already 0 in bitmask)
                 }
 
                 // Create the proof
@@ -1000,6 +999,12 @@ public sealed class SparseMerkleTree
             // Must be an internal node - get sibling and continue
             if (node.NodeType == SmtNodeType.Internal)
             {
+                // If we've exhausted the bit path, we've gone too deep without finding a leaf
+                if (level >= Depth)
+                {
+                    return null;
+                }
+
                 var internalNode = (SmtInternalNode)node;
                 
                 // Determine which child to follow and which is the sibling
@@ -1084,10 +1089,10 @@ public sealed class SparseMerkleTree
 
         // Traverse the tree following the bit path
         var currentHash = rootHash;
-        for (int level = 0; level < Depth; level++)
+        for (int level = 0; level <= Depth; level++)
         {
             // Check if we've reached an empty node (zero hash)
-            if (currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
+            if (level < Depth && currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
             {
                 // Found empty path - add remaining zero-hash siblings
                 for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
