@@ -936,8 +936,9 @@ public sealed class SparseMerkleTree
         var bitPath = GetBitPath(key);
         var keyHash = HashKey(key);
 
-        // Collect sibling hashes along the path
-        var siblings = new List<byte[]>();
+        // Collect sibling hashes along the path using verification-order indexing
+        // We use a dict to collect non-zero siblings, then build the final list
+        var siblingsByVerificationLevel = new Dictionary<int, byte[]>();
         var bitmask = new byte[(Depth + 7) / 8];
 
         // Traverse the tree following the bit path
@@ -973,16 +974,27 @@ public sealed class SparseMerkleTree
 
                 // Found the leaf! We've collected all siblings along the path.
                 // For uncompressed proofs, we need to pad with zero-hashes to reach Depth siblings
-                for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
+                for (int i = level; i < Depth; i++)
                 {
-                    var zeroHash = ZeroHashes[remainingLevel];
+                    int verificationLevel = Depth - 1 - i;
+                    var zeroHash = ZeroHashes[verificationLevel];
                     if (!compress)
                     {
                         // Always add zero-hashes for uncompressed proofs
-                        siblings.Add(zeroHash);
-                        Proofs.SmtProof.SetBit(bitmask, remainingLevel, true);
+                        siblingsByVerificationLevel[verificationLevel] = zeroHash;
+                        Proofs.SmtProof.SetBit(bitmask, verificationLevel, true);
                     }
                     // For compressed proofs, omit zero-hashes (bit already 0 in bitmask)
+                }
+
+                // Convert dictionary to list in verification order
+                var siblings = new List<byte[]>();
+                for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
+                {
+                    if (siblingsByVerificationLevel.TryGetValue(verificationLevel, out var sibling))
+                    {
+                        siblings.Add(sibling);
+                    }
                 }
 
                 // Create the proof
@@ -1011,15 +1023,18 @@ public sealed class SparseMerkleTree
                 bool goRight = bitPath[level];
                 var siblingHash = goRight ? internalNode.LeftHash.ToArray() : internalNode.RightHash.ToArray();
                 
+                // At traversal level i, the sibling will be used at verification level (Depth - 1 - i)
+                int verificationLevel = Depth - 1 - level;
+                
                 // Check if sibling is a zero-hash
-                if (compress && IsZeroHash(siblingHash, level))
+                if (compress && IsZeroHash(siblingHash, verificationLevel))
                 {
                     // Omit zero-hash (bit already 0 in bitmask)
                 }
                 else
                 {
-                    siblings.Add(siblingHash);
-                    Proofs.SmtProof.SetBit(bitmask, level, true);
+                    siblingsByVerificationLevel[verificationLevel] = siblingHash;
+                    Proofs.SmtProof.SetBit(bitmask, verificationLevel, true);
                 }
 
                 // Move to the next level
@@ -1097,8 +1112,9 @@ public sealed class SparseMerkleTree
                 // Found empty path - add remaining zero-hash siblings
                 for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
                 {
-                    var zeroHash = ZeroHashes[remainingLevel];
-                    if (compress && IsZeroHash(zeroHash, remainingLevel))
+                    // At position remainingLevel, the sibling has height Depth - 1 - remainingLevel
+                    var zeroHash = ZeroHashes[Depth - 1 - remainingLevel];
+                    if (compress && IsZeroHash(zeroHash, Depth - 1 - remainingLevel))
                     {
                         // Omit zero-hash (bit already 0 in bitmask)
                     }
@@ -1128,8 +1144,9 @@ public sealed class SparseMerkleTree
                 // Add remaining zero-hash siblings
                 for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
                 {
-                    var zeroHash = ZeroHashes[remainingLevel];
-                    if (compress && IsZeroHash(zeroHash, remainingLevel))
+                    // At position remainingLevel, the sibling has height Depth - 1 - remainingLevel
+                    var zeroHash = ZeroHashes[Depth - 1 - remainingLevel];
+                    if (compress && IsZeroHash(zeroHash, Depth - 1 - remainingLevel))
                     {
                         // Omit zero-hash
                     }
@@ -1166,8 +1183,9 @@ public sealed class SparseMerkleTree
                 // Add remaining zero-hash siblings
                 for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
                 {
-                    var zeroHash = ZeroHashes[remainingLevel];
-                    if (compress && IsZeroHash(zeroHash, remainingLevel))
+                    // At position remainingLevel, the sibling has height Depth - 1 - remainingLevel
+                    var zeroHash = ZeroHashes[Depth - 1 - remainingLevel];
+                    if (compress && IsZeroHash(zeroHash, Depth - 1 - remainingLevel))
                     {
                         // Omit zero-hash
                     }
@@ -1201,7 +1219,8 @@ public sealed class SparseMerkleTree
                 var siblingHash = goRight ? internalNode.LeftHash.ToArray() : internalNode.RightHash.ToArray();
                 
                 // Check if sibling is a zero-hash
-                if (compress && IsZeroHash(siblingHash, level))
+                // At position level, the sibling has height Depth - 1 - level
+                if (compress && IsZeroHash(siblingHash, Depth - 1 - level))
                 {
                     // Omit zero-hash (bit already 0 in bitmask)
                 }
@@ -1220,8 +1239,9 @@ public sealed class SparseMerkleTree
                 // Add remaining zero-hash siblings
                 for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
                 {
-                    var zeroHash = ZeroHashes[remainingLevel];
-                    if (compress && IsZeroHash(zeroHash, remainingLevel))
+                    // At position remainingLevel, the sibling has height Depth - 1 - remainingLevel
+                    var zeroHash = ZeroHashes[Depth - 1 - remainingLevel];
+                    if (compress && IsZeroHash(zeroHash, Depth - 1 - remainingLevel))
                     {
                         // Omit zero-hash
                     }

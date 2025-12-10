@@ -1,5 +1,4 @@
 using System.Text;
-using Xunit;
 using MerkleTree.Exceptions;
 using MerkleTree.Hashing;
 using MerkleTree.Proofs;
