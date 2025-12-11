@@ -936,9 +936,8 @@ public sealed class SparseMerkleTree
         var bitPath = GetBitPath(key);
         var keyHash = HashKey(key);
 
-        // Collect sibling hashes along the path using verification-order indexing
-        // We use a dict to collect non-zero siblings, then build the final list
-        var siblingsByVerificationLevel = new Dictionary<int, byte[]>();
+        // Collect sibling hashes along the path - use array indexed by traversal level
+        var siblings = new byte[Depth][];
         var bitmask = new byte[(Depth + 7) / 8];
 
         // Traverse the tree following the bit path
@@ -973,27 +972,39 @@ public sealed class SparseMerkleTree
                 }
 
                 // Found the leaf! We've collected all siblings along the path.
-                // For uncompressed proofs, we need to pad with zero-hashes to reach Depth siblings
+                // Pad with zero-hashes to reach Depth siblings
                 for (int i = level; i < Depth; i++)
                 {
-                    int verificationLevel = Depth - 1 - i;
-                    var zeroHash = ZeroHashes[verificationLevel];
-                    if (!compress)
+                    siblings[i] = ZeroHashes[Depth - 1 - i];
+                    if (!compress || !IsZeroHash(siblings[i], Depth - 1 - i))
                     {
-                        // Always add zero-hashes for uncompressed proofs
-                        siblingsByVerificationLevel[verificationLevel] = zeroHash;
-                        Proofs.SmtProof.SetBit(bitmask, verificationLevel, true);
+                        // Bitmask uses verification level
+                        Proofs.SmtProof.SetBit(bitmask, Depth - 1 - i, true);
                     }
-                    // For compressed proofs, omit zero-hashes (bit already 0 in bitmask)
                 }
 
-                // Convert dictionary to list in verification order
-                var siblings = new List<byte[]>();
-                for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
+                // Build final siblings array for proof
+                var proofSiblings = new List<byte[]>();
+                if (compress)
                 {
-                    if (siblingsByVerificationLevel.TryGetValue(verificationLevel, out var sibling))
+                    // For compressed: only include siblings with bitmask bit set
+                    for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
                     {
-                        siblings.Add(sibling);
+                        bool bitSet = (bitmask[verificationLevel / 8] & (1 << (verificationLevel % 8))) != 0;
+                        if (bitSet)
+                        {
+                            int traversalLevel = Depth - 1 - verificationLevel;
+                            proofSiblings.Add(siblings[traversalLevel]);
+                        }
+                    }
+                }
+                else
+                {
+                    // For uncompressed: include all siblings in verification order
+                    for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
+                    {
+                        int traversalLevel = Depth - 1 - verificationLevel;
+                        proofSiblings.Add(siblings[traversalLevel]);
                     }
                 }
 
@@ -1003,7 +1014,7 @@ public sealed class SparseMerkleTree
                     leafNode.Value.ToArray(),
                     Depth,
                     HashAlgorithmId,
-                    siblings.ToArray(),
+                    proofSiblings.ToArray(),
                     bitmask,
                     compress);
             }
@@ -1023,18 +1034,12 @@ public sealed class SparseMerkleTree
                 bool goRight = bitPath[level];
                 var siblingHash = goRight ? internalNode.LeftHash.ToArray() : internalNode.RightHash.ToArray();
                 
-                // At traversal level i, the sibling will be used at verification level (Depth - 1 - i)
-                int verificationLevel = Depth - 1 - level;
-                
-                // Check if sibling is a zero-hash
-                if (compress && IsZeroHash(siblingHash, verificationLevel))
+                // Store sibling at traversal level
+                siblings[level] = siblingHash;
+                if (!compress || !IsZeroHash(siblingHash, Depth - 1 - level))
                 {
-                    // Omit zero-hash (bit already 0 in bitmask)
-                }
-                else
-                {
-                    siblingsByVerificationLevel[verificationLevel] = siblingHash;
-                    Proofs.SmtProof.SetBit(bitmask, verificationLevel, true);
+                    // Bitmask uses verification level
+                    Proofs.SmtProof.SetBit(bitmask, Depth - 1 - level, true);
                 }
 
                 // Move to the next level
@@ -1098,8 +1103,8 @@ public sealed class SparseMerkleTree
         var bitPath = GetBitPath(key);
         var keyHash = HashKey(key);
 
-        // Collect sibling hashes along the path
-        var siblings = new List<byte[]>();
+        // Collect sibling hashes along the path - use array indexed by traversal level
+        var siblings = new byte[Depth][];
         var bitmask = new byte[(Depth + 7) / 8];
 
         // Traverse the tree following the bit path
@@ -1109,19 +1114,37 @@ public sealed class SparseMerkleTree
             // Check if we've reached an empty node (zero hash)
             if (level < Depth && currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
             {
-                // Found empty path - add remaining zero-hash siblings
-                for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
+                // Found empty path - fill remaining siblings with zero-hashes
+                for (int i = level; i < Depth; i++)
                 {
-                    // At position remainingLevel, the sibling has height Depth - 1 - remainingLevel
-                    var zeroHash = ZeroHashes[Depth - 1 - remainingLevel];
-                    if (compress && IsZeroHash(zeroHash, Depth - 1 - remainingLevel))
+                    siblings[i] = ZeroHashes[Depth - 1 - i];
+                    if (!compress || !IsZeroHash(siblings[i], Depth - 1 - i))
                     {
-                        // Omit zero-hash (bit already 0 in bitmask)
+                        // Bitmask uses verification level
+                        Proofs.SmtProof.SetBit(bitmask, Depth - 1 - i, true);
                     }
-                    else
+                }
+
+                // Build proof siblings in verification order
+                var proofSiblings = new List<byte[]>();
+                if (compress)
+                {
+                    for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
                     {
-                        siblings.Add(zeroHash);
-                        Proofs.SmtProof.SetBit(bitmask, remainingLevel, true);
+                        bool bitSet = (bitmask[verificationLevel / 8] & (1 << (verificationLevel % 8))) != 0;
+                        if (bitSet)
+                        {
+                            int traversalLevel = Depth - 1 - verificationLevel;
+                            proofSiblings.Add(siblings[traversalLevel]);
+                        }
+                    }
+                }
+                else
+                {
+                    for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
+                    {
+                        int traversalLevel = Depth - 1 - verificationLevel;
+                        proofSiblings.Add(siblings[traversalLevel]);
                     }
                 }
 
@@ -1130,7 +1153,7 @@ public sealed class SparseMerkleTree
                     keyHash,
                     Depth,
                     HashAlgorithmId,
-                    siblings.ToArray(),
+                    proofSiblings.ToArray(),
                     bitmask,
                     compress,
                     Proofs.NonInclusionProofType.EmptyPath);
@@ -1141,19 +1164,36 @@ public sealed class SparseMerkleTree
             if (nodeBlob == null)
             {
                 // Node not in storage - treat as empty path
-                // Add remaining zero-hash siblings
-                for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
+                for (int i = level; i < Depth; i++)
                 {
-                    // At position remainingLevel, the sibling has height Depth - 1 - remainingLevel
-                    var zeroHash = ZeroHashes[Depth - 1 - remainingLevel];
-                    if (compress && IsZeroHash(zeroHash, Depth - 1 - remainingLevel))
+                    siblings[i] = ZeroHashes[Depth - 1 - i];
+                    if (!compress || !IsZeroHash(siblings[i], Depth - 1 - i))
                     {
-                        // Omit zero-hash
+                        // Bitmask uses verification level
+                        Proofs.SmtProof.SetBit(bitmask, Depth - 1 - i, true);
                     }
-                    else
+                }
+
+                // Build proof siblings in verification order
+                var proofSiblings = new List<byte[]>();
+                if (compress)
+                {
+                    for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
                     {
-                        siblings.Add(zeroHash);
-                        Proofs.SmtProof.SetBit(bitmask, remainingLevel, true);
+                        bool bitSet = (bitmask[verificationLevel / 8] & (1 << (verificationLevel % 8))) != 0;
+                        if (bitSet)
+                        {
+                            int traversalLevel = Depth - 1 - verificationLevel;
+                            proofSiblings.Add(siblings[traversalLevel]);
+                        }
+                    }
+                }
+                else
+                {
+                    for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
+                    {
+                        int traversalLevel = Depth - 1 - verificationLevel;
+                        proofSiblings.Add(siblings[traversalLevel]);
                     }
                 }
 
@@ -1161,7 +1201,7 @@ public sealed class SparseMerkleTree
                     keyHash,
                     Depth,
                     HashAlgorithmId,
-                    siblings.ToArray(),
+                    proofSiblings.ToArray(),
                     bitmask,
                     compress,
                     Proofs.NonInclusionProofType.EmptyPath);
@@ -1180,19 +1220,36 @@ public sealed class SparseMerkleTree
                 }
 
                 // Key hash doesn't match - this is a leaf mismatch proof
-                // Add remaining zero-hash siblings
-                for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
+                for (int i = level; i < Depth; i++)
                 {
-                    // At position remainingLevel, the sibling has height Depth - 1 - remainingLevel
-                    var zeroHash = ZeroHashes[Depth - 1 - remainingLevel];
-                    if (compress && IsZeroHash(zeroHash, Depth - 1 - remainingLevel))
+                    siblings[i] = ZeroHashes[Depth - 1 - i];
+                    if (!compress || !IsZeroHash(siblings[i], Depth - 1 - i))
                     {
-                        // Omit zero-hash
+                        // Bitmask uses verification level
+                        Proofs.SmtProof.SetBit(bitmask, Depth - 1 - i, true);
                     }
-                    else
+                }
+
+                // Build proof siblings in verification order
+                var proofSiblings = new List<byte[]>();
+                if (compress)
+                {
+                    for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
                     {
-                        siblings.Add(zeroHash);
-                        Proofs.SmtProof.SetBit(bitmask, remainingLevel, true);
+                        bool bitSet = (bitmask[verificationLevel / 8] & (1 << (verificationLevel % 8))) != 0;
+                        if (bitSet)
+                        {
+                            int traversalLevel = Depth - 1 - verificationLevel;
+                            proofSiblings.Add(siblings[traversalLevel]);
+                        }
+                    }
+                }
+                else
+                {
+                    for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
+                    {
+                        int traversalLevel = Depth - 1 - verificationLevel;
+                        proofSiblings.Add(siblings[traversalLevel]);
                     }
                 }
 
@@ -1201,7 +1258,7 @@ public sealed class SparseMerkleTree
                     keyHash,
                     Depth,
                     HashAlgorithmId,
-                    siblings.ToArray(),
+                    proofSiblings.ToArray(),
                     bitmask,
                     compress,
                     Proofs.NonInclusionProofType.LeafMismatch,
@@ -1218,16 +1275,12 @@ public sealed class SparseMerkleTree
                 bool goRight = bitPath[level];
                 var siblingHash = goRight ? internalNode.LeftHash.ToArray() : internalNode.RightHash.ToArray();
                 
-                // Check if sibling is a zero-hash
-                // At position level, the sibling has height Depth - 1 - level
-                if (compress && IsZeroHash(siblingHash, Depth - 1 - level))
+                // Store sibling at traversal level
+                siblings[level] = siblingHash;
+                if (!compress || !IsZeroHash(siblingHash, Depth - 1 - level))
                 {
-                    // Omit zero-hash (bit already 0 in bitmask)
-                }
-                else
-                {
-                    siblings.Add(siblingHash);
-                    Proofs.SmtProof.SetBit(bitmask, level, true);
+                    // Bitmask uses verification level
+                    Proofs.SmtProof.SetBit(bitmask, Depth - 1 - level, true);
                 }
 
                 // Move to the next level
@@ -1236,19 +1289,36 @@ public sealed class SparseMerkleTree
             else
             {
                 // Empty node - treat as empty path
-                // Add remaining zero-hash siblings
-                for (int remainingLevel = level; remainingLevel < Depth; remainingLevel++)
+                for (int i = level; i < Depth; i++)
                 {
-                    // At position remainingLevel, the sibling has height Depth - 1 - remainingLevel
-                    var zeroHash = ZeroHashes[Depth - 1 - remainingLevel];
-                    if (compress && IsZeroHash(zeroHash, Depth - 1 - remainingLevel))
+                    siblings[i] = ZeroHashes[Depth - 1 - i];
+                    if (!compress || !IsZeroHash(siblings[i], Depth - 1 - i))
                     {
-                        // Omit zero-hash
+                        // Bitmask uses verification level
+                        Proofs.SmtProof.SetBit(bitmask, Depth - 1 - i, true);
                     }
-                    else
+                }
+
+                // Build proof siblings in verification order
+                var proofSiblings = new List<byte[]>();
+                if (compress)
+                {
+                    for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
                     {
-                        siblings.Add(zeroHash);
-                        Proofs.SmtProof.SetBit(bitmask, remainingLevel, true);
+                        bool bitSet = (bitmask[verificationLevel / 8] & (1 << (verificationLevel % 8))) != 0;
+                        if (bitSet)
+                        {
+                            int traversalLevel = Depth - 1 - verificationLevel;
+                            proofSiblings.Add(siblings[traversalLevel]);
+                        }
+                    }
+                }
+                else
+                {
+                    for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
+                    {
+                        int traversalLevel = Depth - 1 - verificationLevel;
+                        proofSiblings.Add(siblings[traversalLevel]);
                     }
                 }
 
@@ -1256,7 +1326,7 @@ public sealed class SparseMerkleTree
                     keyHash,
                     Depth,
                     HashAlgorithmId,
-                    siblings.ToArray(),
+                    proofSiblings.ToArray(),
                     bitmask,
                     compress,
                     Proofs.NonInclusionProofType.EmptyPath);

@@ -83,8 +83,10 @@ public class SmtProofTests
         var keys = new[] { "key1", "key2", "key3" };
         var values = new[] { "value1", "value2", "value3" };
 
-        // Insert multiple key-value pairs
+        // Insert multiple key-value pairs and track root hash after each insertion
         ReadOnlyMemory<byte> rootHash = _smt.ZeroHashes[_smt.Depth];
+        var rootHashes = new ReadOnlyMemory<byte>[keys.Length];
+        
         for (int i = 0; i < keys.Length; i++)
         {
             var key = Encoding.UTF8.GetBytes(keys[i]);
@@ -92,19 +94,20 @@ public class SmtProofTests
             var updateResult = await _smt.UpdateAsync(key, value, rootHash, storage);
             await storage.WriteBatchAsync(updateResult.NodesToPersist);
             rootHash = updateResult.NewRootHash;
+            rootHashes[i] = rootHash;
         }
 
-        // Act & Assert - Generate and verify proofs for all keys
+        // Act & Assert - Generate and verify proofs for all keys against their corresponding root hashes
         for (int i = 0; i < keys.Length; i++)
         {
             var key = Encoding.UTF8.GetBytes(keys[i]);
             var value = Encoding.UTF8.GetBytes(values[i]);
-            var proof = await _smt.GenerateInclusionProofAsync(key, rootHash, storage);
+            var proof = await _smt.GenerateInclusionProofAsync(key, rootHashes[i], storage);
 
             Assert.NotNull(proof);
             Assert.Equal(value, proof.Value);
             
-            bool isValid = proof.Verify(rootHash.ToArray(), _hashFunction, _smt.ZeroHashes);
+            bool isValid = proof.Verify(rootHashes[i].ToArray(), _hashFunction, _smt.ZeroHashes);
             Assert.True(isValid, $"Proof for key{i + 1} should be valid");
         }
     }
@@ -283,8 +286,10 @@ public class SmtProofTests
     [Fact]
     public void InclusionProof_Deserialize_InvalidData_ThrowsMalformedProofException()
     {
-        // Arrange - Create invalid data (too short)
-        var invalidData = new byte[] { 1, 2, 3 };
+        // Arrange - Create invalid data (too short to read depth after proof type)
+        // Byte 0: version=1, Byte 1: proofType=0x01 (inclusion), Byte 2: flags=0
+        // But missing the 4-byte depth field
+        var invalidData = new byte[] { 1, 0x01, 0 };
 
         // Act & Assert
         var exception = Assert.Throws<MalformedProofException>(() => SmtInclusionProof.Deserialize(invalidData));
