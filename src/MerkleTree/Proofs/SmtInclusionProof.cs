@@ -116,7 +116,7 @@ public sealed class SmtInclusionProof : SmtProof
         for (int level = 0; level < Depth; level++)
         {
             var siblingHash = allSiblings[level];
-            var isRight = bitPath[level];
+            var isRight = bitPath[Depth - 1 - level];
 
             // Compute parent hash with domain separation: Hash(0x01 || left || right)
             byte[] combinedData;

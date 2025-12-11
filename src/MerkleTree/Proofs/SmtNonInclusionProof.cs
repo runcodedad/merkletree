@@ -163,15 +163,17 @@ public sealed class SmtNonInclusionProof : SmtProof
         {
             // Verify the conflicting key hash is different from the target key hash
             // Note: ConflictingKeyHash and ConflictingValue are guaranteed non-null for LeafMismatch type
-            if (ConflictingKeyHash!.SequenceEqual(KeyHash))
+            var conflictingKeyHash = ConflictingKeyHash!; // Already validated in constructor
+            var conflictingValue = ConflictingValue!; // Already validated in constructor
+            
+            if (conflictingKeyHash.SequenceEqual(KeyHash))
                 return false; // Key hashes should be different for a valid non-inclusion proof
 
             // Compute leaf hash of the conflicting leaf: Hash(0x00 || conflictingKeyHash || conflictingValue)
-            var conflictingValue = ConflictingValue!; // Already validated in constructor
-            var leafData = new byte[1 + ConflictingKeyHash.Length + conflictingValue.Length];
+            var leafData = new byte[1 + conflictingKeyHash.Length + conflictingValue.Length];
             leafData[0] = 0x00; // Leaf domain separator
-            Array.Copy(ConflictingKeyHash, 0, leafData, 1, ConflictingKeyHash.Length);
-            Array.Copy(conflictingValue, 0, leafData, 1 + ConflictingKeyHash.Length, conflictingValue.Length);
+            Array.Copy(conflictingKeyHash, 0, leafData, 1, conflictingKeyHash.Length);
+            Array.Copy(conflictingValue, 0, leafData, 1 + conflictingKeyHash.Length, conflictingValue.Length);
             currentHash = hashFunction.ComputeHash(leafData);
         }
 
@@ -182,7 +184,7 @@ public sealed class SmtNonInclusionProof : SmtProof
         for (int level = 0; level < Depth; level++)
         {
             var siblingHash = allSiblings[level];
-            var isRight = bitPath[level];
+            var isRight = bitPath[Depth - 1 - level];
 
             // Compute parent hash with domain separation: Hash(0x01 || left || right)
             byte[] combinedData;
