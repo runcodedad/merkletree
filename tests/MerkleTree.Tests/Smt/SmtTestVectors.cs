@@ -11,8 +11,20 @@ namespace MerkleTree.Tests.Smt;
 /// These tests verify that SMT produces consistent results across versions.
 /// </summary>
 /// <remarks>
-/// IMPORTANT: If any of these tests fail, it indicates a BREAKING CHANGE
-/// in the SMT implementation that will affect existing deployments.
+/// <para>IMPORTANT: If any of these tests fail, it indicates a BREAKING CHANGE
+/// in the SMT implementation that will affect existing deployments.</para>
+/// 
+/// <para><strong>TODO Process for Capturing Expected Values:</strong></para>
+/// <list type="number">
+/// <item>Wait for SMT operations to be fully stable (all operation tests passing)</item>
+/// <item>Run each test once to capture actual output values</item>
+/// <item>Replace placeholder TODOs with actual hex values</item>
+/// <item>Uncomment the Assert.Equal() assertions</item>
+/// <item>These values then become the regression baseline</item>
+/// </list>
+/// 
+/// <para>Current status: SMT operations have some known issues (see SMT_IMPLEMENTATION_NOTES.md),
+/// so test vectors are documented but assertions are commented out until stable.</para>
 /// </remarks>
 public class SmtTestVectors
 {

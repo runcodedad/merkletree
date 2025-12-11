@@ -12,14 +12,16 @@ namespace MerkleTree.Tests.Smt;
 /// </summary>
 public class SmtPropertyTests
 {
+    private const int RANDOM_SEED = 42; // Fixed seed for reproducible test runs
+    
     private readonly Sha256HashFunction _sha256;
     private readonly Random _random;
 
     public SmtPropertyTests()
     {
         _sha256 = new Sha256HashFunction();
-        // Use fixed seed for reproducible tests
-        _random = new Random(42);
+        // Use fixed seed for reproducible tests - ensures same random sequence every run
+        _random = new Random(RANDOM_SEED);
     }
 
     #region Helper Methods
@@ -219,9 +221,11 @@ public class SmtPropertyTests
             var value1 = GenerateRandomValue();
             var value2 = GenerateRandomValue();
 
-            // Ensure values are different
-            if (value1.SequenceEqual(value2))
-                value2[0] ^= 1;
+            // Ensure values are different by modifying until they differ
+            while (value1.SequenceEqual(value2))
+            {
+                value2 = GenerateRandomValue();
+            }
 
             // Act
             var result1 = await tree.UpdateAsync(key, value1, tree.ZeroHashes[tree.Depth], storage);
@@ -314,9 +318,13 @@ public class SmtPropertyTests
             // Try to prove non-inclusion of different key
             var nonExistentKey = GenerateRandomKey();
             
-            // Ensure keys are different
-            while (existingKey.SequenceEqual(nonExistentKey))
+            // Ensure keys are different (max 10 attempts to avoid infinite loop)
+            int attempts = 0;
+            while (existingKey.SequenceEqual(nonExistentKey) && attempts++ < 10)
                 nonExistentKey = GenerateRandomKey();
+            
+            if (existingKey.SequenceEqual(nonExistentKey))
+                return; // Skip this iteration if we can't generate a different key
 
             // Act
             var proof = await tree.GenerateNonInclusionProofAsync(nonExistentKey, result.NewRootHash, storage);

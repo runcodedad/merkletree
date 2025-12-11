@@ -28,7 +28,7 @@ This library provides a robust, well-tested implementation of Merkle trees for .
 - **Cache persistence**: Save and load cache to/from files for reuse across sessions
 - **Type-safe**: Full C# type safety with nullable reference types enabled
 - **XML documentation**: IntelliSense support for better developer experience
-- **Well-tested**: Comprehensive test coverage (590+ tests with 90%+ coverage)
+- **Well-tested**: Comprehensive test coverage (596 tests with 90%+ coverage)
 - **Deterministic**: Cross-platform deterministic hashing and serialization
 - **Open source**: MIT licensed
 
@@ -501,7 +501,7 @@ dotnet pack -c Release
 
 ## Testing
 
-The library includes comprehensive test coverage with 590+ tests:
+The library includes comprehensive test coverage with 596 tests:
 
 - **Unit Tests**: Core functionality for all components
 - **Integration Tests**: End-to-end workflows
