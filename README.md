@@ -28,7 +28,8 @@ This library provides a robust, well-tested implementation of Merkle trees for .
 - **Cache persistence**: Save and load cache to/from files for reuse across sessions
 - **Type-safe**: Full C# type safety with nullable reference types enabled
 - **XML documentation**: IntelliSense support for better developer experience
-- **Well-tested**: Comprehensive test coverage (167+ tests)
+- **Well-tested**: Comprehensive test coverage (590+ tests with 90%+ coverage)
+- **Deterministic**: Cross-platform deterministic hashing and serialization
 - **Open source**: MIT licensed
 
 ## Installation
@@ -498,16 +499,39 @@ dotnet test
 dotnet pack -c Release
 ```
 
+## Testing
+
+The library includes comprehensive test coverage with 590+ tests:
+
+- **Unit Tests**: Core functionality for all components
+- **Integration Tests**: End-to-end workflows
+- **Determinism Tests**: Cross-platform consistency
+- **Property-Based Tests**: Randomized testing of invariants
+- **Test Vectors**: Regression tests with known values
+- **Reference Implementation**: In-memory SMT adapter for testing
+
+### Running Tests
+
+```bash
+# Run all tests
+dotnet test
+
+# Run with coverage
+dotnet test --collect:"XPlat Code Coverage"
+```
+
+For detailed testing information, see [Testing Guide](docs/TESTING.md).
+
 ## Documentation
 
 For detailed information, see:
 
+- [Testing Guide](docs/TESTING.md) - Comprehensive testing documentation and patterns
 - [Proof Generation Documentation](docs/PROOF_GENERATION.md) - Complete guide to generating and verifying Merkle proofs
 - [Proof Serialization Format](docs/PROOF_SERIALIZATION.md) - Binary serialization format specification
 - [Cache Serialization Format](docs/CACHE_SERIALIZATION.md) - Binary format for persistent Merkle tree cache storage
 - [Streaming Documentation](docs/STREAMING.md) - Details on streaming tree construction for large datasets
 - [Sparse Merkle Tree (SMT)](src/MerkleTree/Smt/README.md) - Complete SMT implementation with pluggable persistence and key-value operations
-- [SMT Operations Status](docs/SMT_OPERATIONS_STATUS.md) - Status report on SMT core operations implementation
 - [SMT Implementation Notes](docs/SMT_IMPLEMENTATION_NOTES.md) - Technical details and debugging guide for SMT operations
 - XML documentation comments in the source code
 - IntelliSense in your IDE
