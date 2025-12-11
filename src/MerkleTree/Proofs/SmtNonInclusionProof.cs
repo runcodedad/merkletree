@@ -149,27 +149,37 @@ public sealed class SmtNonInclusionProof : SmtProof
                 $"Zero-hash table depth {zeroHashes.Depth} does not match proof depth {Depth}.",
                 nameof(zeroHashes));
 
-        // Get all sibling hashes (including reconstructed zero-hashes for compressed proofs)
+        // Get all sibling hashes needed for verification
+        // For compressed proofs, this reconstructs zero-hash siblings from the zero-hash table
+        // For uncompressed proofs, this just returns the stored sibling array
         var allSiblings = GetAllSiblingHashes(zeroHashes);
 
         byte[] currentHash;
 
+        // Non-inclusion proofs have two types, each with different starting points:
         if (ProofType == NonInclusionProofType.EmptyPath)
         {
-            // Start with zero-hash at level 0 (empty leaf)
+            // Empty Path Proof: The path to the target key leads to an empty subtree
+            // Start verification with the zero-hash at level 0 (empty leaf level)
+            // This proves the key doesn't exist because its path contains only empty nodes
             currentHash = zeroHashes[0];
         }
         else // LeafMismatch
         {
-            // Verify the conflicting key hash is different from the target key hash
+            // Leaf Mismatch Proof: The path to the target key leads to a different leaf
+            // This proves the target key doesn't exist because a different key occupies its position
+            
+            // First, verify the conflicting key hash is actually different from the target
             // Note: ConflictingKeyHash and ConflictingValue are guaranteed non-null for LeafMismatch type
             var conflictingKeyHash = ConflictingKeyHash!; // Already validated in constructor
             var conflictingValue = ConflictingValue!; // Already validated in constructor
             
             if (conflictingKeyHash.SequenceEqual(KeyHash))
-                return false; // Key hashes should be different for a valid non-inclusion proof
+                return false; // If key hashes match, this cannot be a valid non-inclusion proof
 
-            // Compute leaf hash of the conflicting leaf: Hash(0x00 || conflictingKeyHash || conflictingValue)
+            // Compute the leaf hash of the conflicting leaf using standard leaf hash format
+            // Leaf hash format: Hash(0x00 || keyHash || value)
+            // The 0x00 prefix is the leaf domain separator
             var leafData = new byte[1 + conflictingKeyHash.Length + conflictingValue.Length];
             leafData[0] = 0x00; // Leaf domain separator
             Array.Copy(conflictingKeyHash, 0, leafData, 1, conflictingKeyHash.Length);
@@ -177,13 +187,19 @@ public sealed class SmtNonInclusionProof : SmtProof
             currentHash = hashFunction.ComputeHash(leafData);
         }
 
-        // Get bit path for tree traversal (using the target key hash, not the conflicting one)
+        // Get bit path for tree traversal
+        // IMPORTANT: We use the target key's bit path, not the conflicting leaf's path
+        // This is because the proof must reconstruct the root using the target key's position
         var bitPath = GetBitPath();
 
-        // Traverse from leaf to root
+        // Traverse from leaf to root, computing parent hashes at each level
         for (int level = 0; level < Depth; level++)
         {
+            // Get the sibling hash at this verification level
             var siblingHash = allSiblings[level];
+            
+            // Determine if the current node is on the right side of its parent
+            // We read from the end of bitPath because verification proceeds bottom-up
             var isRight = bitPath[Depth - 1 - level];
 
             // Compute parent hash with domain separation: Hash(0x01 || left || right)
@@ -239,41 +255,47 @@ public sealed class SmtNonInclusionProof : SmtProof
     /// </remarks>
     public byte[] Serialize()
     {
+        // Prepare hash algorithm ID as UTF-8 bytes for serialization
         var algorithmIdBytes = System.Text.Encoding.UTF8.GetBytes(HashAlgorithmId);
+        
+        // Determine hash size from the first sibling hash if available, otherwise use key hash length
         int hashSize = SiblingHashes.Length > 0 ? SiblingHashes[0].Length : KeyHash.Length;
 
-        // Calculate total size
-        int totalSize = 1 + // version
-                       1 + // proof type
-                       1 + // flags
-                       4 + // depth
-                       4 + algorithmIdBytes.Length + // algorithm ID length + data
-                       4 + KeyHash.Length; // key hash length + data
+        // Calculate total size of the serialized proof
+        // Non-inclusion proofs have variable size depending on proof type
+        int totalSize = 1 + // version (1 byte)
+                       1 + // proof type (1 byte): 0x02 for non-inclusion
+                       1 + // flags (1 byte): bit 0 = IsCompressed, bit 1 = IsLeafMismatch
+                       4 + // depth (4 bytes, little-endian int32)
+                       4 + algorithmIdBytes.Length + // algorithm ID length (4 bytes) + UTF-8 bytes
+                       4 + KeyHash.Length; // target key hash length (4 bytes) + hash bytes
 
-        // Add conflicting leaf data if leaf mismatch proof
+        // For leaf mismatch proofs, we need to include the conflicting leaf's data
+        // This allows the verifier to compute the conflicting leaf's hash
         if (ProofType == NonInclusionProofType.LeafMismatch)
         {
-            totalSize += 4 + ConflictingKeyHash!.Length + // conflicting key hash length + data
-                        4 + ConflictingValue!.Length; // conflicting value length + data
+            totalSize += 4 + ConflictingKeyHash!.Length + // conflicting key hash length + bytes
+                        4 + ConflictingValue!.Length; // conflicting value length + bytes
         }
 
-        totalSize += 4 + SiblingBitmask.Length + // bitmask length + data
-                    4 + // sibling count
-                    (SiblingHashes.Length * hashSize); // sibling hashes
+        // Add space for sibling data (same for both proof types)
+        totalSize += 4 + SiblingBitmask.Length + // bitmask length (4 bytes) + bitmask bytes
+                    4 + // sibling count (4 bytes, int32)
+                    (SiblingHashes.Length * hashSize); // all sibling hashes concatenated
 
         var result = new byte[totalSize];
-        int offset = 0;
+        int offset = 0; // Track current write position in the buffer
 
-        // Write version
+        // Write version number (currently 1) - allows for future format changes
         result[offset++] = 1;
 
-        // Write proof type (0x02 = non-inclusion)
+        // Write proof type: 0x02 for non-inclusion proof (0x01 is used for inclusion proofs)
         result[offset++] = 0x02;
 
-        // Write flags
+        // Write flags byte: bit 0 = compression, bit 1 = leaf mismatch type
         byte flags = 0;
-        if (IsCompressed) flags |= 0x01;
-        if (ProofType == NonInclusionProofType.LeafMismatch) flags |= 0x02;
+        if (IsCompressed) flags |= 0x01; // Set bit 0 if proof uses compression
+        if (ProofType == NonInclusionProofType.LeafMismatch) flags |= 0x02; // Set bit 1 for leaf mismatch
         result[offset++] = flags;
 
         // Write depth
@@ -292,31 +314,36 @@ public sealed class SmtNonInclusionProof : SmtProof
         KeyHash.CopyTo(result, offset);
         offset += KeyHash.Length;
 
-        // Write conflicting leaf data if leaf mismatch
+        // Write conflicting leaf data if this is a leaf mismatch proof
+        // This data allows the verifier to compute the hash of the leaf that exists
+        // at the target key's position, proving a different key occupies that slot
         if (ProofType == NonInclusionProofType.LeafMismatch)
         {
+            // Write conflicting key hash: length-prefixed byte array
             BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), ConflictingKeyHash!.Length);
             offset += 4;
             ConflictingKeyHash.CopyTo(result, offset);
             offset += ConflictingKeyHash.Length;
 
+            // Write conflicting value: length-prefixed byte array
             BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), ConflictingValue!.Length);
             offset += 4;
             ConflictingValue.CopyTo(result, offset);
             offset += ConflictingValue.Length;
         }
 
-        // Write sibling bitmask
+        // Write sibling bitmask: used for compressed proofs to track which siblings are zero-hashes
+        // For uncompressed proofs, this may still be present but not actively used
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), SiblingBitmask.Length);
         offset += 4;
         SiblingBitmask.CopyTo(result, offset);
         offset += SiblingBitmask.Length;
 
-        // Write sibling count
+        // Write count of sibling hashes that follow
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), SiblingHashes.Length);
         offset += 4;
 
-        // Write sibling hashes
+        // Write all sibling hashes sequentially (no length prefix per hash, fixed size)
         for (int i = 0; i < SiblingHashes.Length; i++)
         {
             SiblingHashes[i].CopyTo(result, offset);

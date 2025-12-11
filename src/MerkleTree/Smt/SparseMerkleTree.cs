@@ -243,10 +243,17 @@ public sealed class SparseMerkleTree
         if (key.Length == 0)
             throw new ArgumentException("Key cannot be empty.", nameof(key));
 
-        // Hash the key to get a fixed-length representation
+        // Step 1: Hash the key to get a fixed-length representation
+        // This ensures all keys, regardless of original length, map to the same size
+        // For example, "user" and "very-long-username-12345" both become 32-byte hashes with SHA-256
         var keyHash = _hashFunction.ComputeHash(key);
 
-        // Convert hash to bit path using tree depth
+        // Step 2: Convert the key hash to a bit path using the first `Depth` bits
+        // The bit path determines the leaf's position in the tree:
+        // - bitPath[0] = first bit = root level decision (left=false, right=true)
+        // - bitPath[1] = second bit = level 1 decision
+        // - bitPath[Depth-1] = last bit = final decision before reaching leaf
+        // For depth 256 with SHA-256, all 256 bits are used, giving 2^256 possible positions
         return HashUtils.GetBitPath(keyHash, Depth);
     }
 
@@ -386,15 +393,26 @@ public sealed class SparseMerkleTree
         if (value.Length == 0)
             throw new ArgumentException("Value cannot be empty.", nameof(value));
 
+        // Step 1: Hash the key to get a fixed-length key hash
+        // This is the same hash used for bit path computation
         var keyHash = _hashFunction.ComputeHash(key);
 
-        // Compute leaf hash: Hash(0x00 || keyHash || value)
+        // Step 2: Compute the leaf node's hash using domain-separated hashing
+        // Leaf hash format: Hash(0x00 || keyHash || value)
+        // The 0x00 prefix (LeafDomainSeparator) prevents collision attacks between:
+        // - Leaf nodes (which use 0x00)
+        // - Internal nodes (which use 0x01)
+        // This is critical for security: without domain separation, an attacker could
+        // potentially forge proofs by crafting values that collide with internal node hashes
         var leafData = new byte[1 + keyHash.Length + value.Length];
-        leafData[0] = MerkleTreeBase.LeafDomainSeparator;
+        leafData[0] = MerkleTreeBase.LeafDomainSeparator; // 0x00
         Array.Copy(keyHash, 0, leafData, 1, keyHash.Length);
         Array.Copy(value, 0, leafData, 1 + keyHash.Length, value.Length);
         var nodeHash = _hashFunction.ComputeHash(leafData);
 
+        // Step 3: Create and return the leaf node
+        // includeOriginalKey determines if we store the original key bytes (needed for some proof types)
+        // If false, only the key hash is stored to save memory
         return new SmtLeafNode(
             keyHash,
             value,
@@ -433,9 +451,16 @@ public sealed class SparseMerkleTree
         if (rightHash.Length == 0)
             throw new ArgumentException("Right hash cannot be empty.", nameof(rightHash));
 
-        // Compute internal node hash: Hash(0x01 || leftHash || rightHash)
+        // Compute internal node hash using domain-separated hashing
+        // Internal node hash format: Hash(0x01 || leftHash || rightHash)
+        // The 0x01 prefix (InternalNodeDomainSeparator) distinguishes internal nodes from:
+        // - Leaf nodes (which use 0x00)
+        // This prevents second-preimage attacks where leaf data could be crafted to
+        // match an internal node's hash structure
+        // The left-to-right ordering is critical: leftHash || rightHash ensures
+        // the tree structure is unambiguous and deterministic
         var internalData = new byte[1 + leftHash.Length + rightHash.Length];
-        internalData[0] = MerkleTreeBase.InternalNodeDomainSeparator;
+        internalData[0] = MerkleTreeBase.InternalNodeDomainSeparator; // 0x01
         Array.Copy(leftHash, 0, internalData, 1, leftHash.Length);
         Array.Copy(rightHash, 0, internalData, 1 + leftHash.Length, rightHash.Length);
         var nodeHash = _hashFunction.ComputeHash(internalData);
@@ -481,64 +506,73 @@ public sealed class SparseMerkleTree
         if (rootHash.IsEmpty)
             throw new ArgumentException("Root hash cannot be empty.", nameof(rootHash));
 
-        // Get the bit path for the key
+        // Step 1: Compute the bit path that determines where this key should be located
+        // The bit path is derived from the key's hash and specifies left/right at each tree level
         var bitPath = GetBitPath(key);
         var keyHash = HashKey(key);
 
-        // Traverse the tree following the bit path
+        // Step 2: Traverse the tree from root to leaf following the bit path
         var currentHash = rootHash;
         for (int level = 0; level <= Depth; level++)
         {
-            // Check if we've reached an empty node (zero hash)
+            // Check if we've reached an empty subtree (indicated by zero-hash)
             // At tree level `level` (0=root), we have a subtree of height (Depth-level)
-            // So we check against ZeroHashes[Depth-level]
+            // For example, at level 0 (root), we check ZeroHashes[Depth] (full tree height)
+            // At level 1, we check ZeroHashes[Depth-1] (one level down)
             if (level < Depth && currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
             {
+                // Current position is empty - key does not exist
                 return SmtGetResult.CreateNotFound();
             }
 
-            // Read the current node
+            // Step 3: Read the node at the current position from storage
             var nodeBlob = await nodeReader.ReadNodeByHashAsync(currentHash, cancellationToken);
             if (nodeBlob == null)
             {
                 // Node not in storage - key not found
+                // This can happen if the tree is incomplete or corrupted
                 return SmtGetResult.CreateNotFound();
             }
 
+            // Deserialize the node to determine its type (leaf, internal, or empty)
             var node = SmtNodeSerializer.Deserialize(nodeBlob.SerializedNode);
 
-            // If we've reached a leaf, check if it matches our key
+            // Step 4: If we've reached a leaf, check if it contains our target key
             if (node.NodeType == SmtNodeType.Leaf)
             {
                 var leafNode = (SmtLeafNode)node;
                 if (leafNode.KeyHash.Span.SequenceEqual(keyHash))
                 {
+                    // Found the key! Return its value
                     return SmtGetResult.CreateFound(leafNode.Value);
                 }
-                // Key hash doesn't match - key not in tree
+                // Leaf exists but contains a different key - target key not in tree
                 return SmtGetResult.CreateNotFound();
             }
 
-            // Must be an internal node - follow the bit path
+            // Step 5: If we've reached an internal node, follow the bit path to the next level
             if (node.NodeType == SmtNodeType.Internal)
             {
-                // If we've exhausted the bit path, we've gone too deep without finding a leaf
+                // Safety check: ensure we haven't exceeded the tree depth
                 if (level >= Depth)
                 {
+                    // Traversed too deep without finding a leaf - malformed tree
                     return SmtGetResult.CreateNotFound();
                 }
                 
                 var internalNode = (SmtInternalNode)node;
+                // Follow bit path: false (0) = left child, true (1) = right child
                 currentHash = bitPath[level] ? internalNode.RightHash : internalNode.LeftHash;
             }
             else
             {
-                // Empty node encountered
+                // Empty node encountered during traversal - key not found
                 return SmtGetResult.CreateNotFound();
             }
         }
 
         // Should not reach here if tree depth is correct
+        // This would indicate a tree structure issue
         return SmtGetResult.CreateNotFound();
     }
 
@@ -588,15 +622,24 @@ public sealed class SparseMerkleTree
         if (rootHash.IsEmpty)
             throw new ArgumentException("Root hash cannot be empty.", nameof(rootHash));
 
+        // Initialize the list to collect all nodes that need to be written to storage
         var nodesToPersist = new List<Persistence.SmtNodeBlob>();
+        
+        // Step 1: Compute the bit path that determines where this key should be located
         var bitPath = GetBitPath(key);
+        
+        // Step 2: Create the new leaf node with the key-value pair
+        // We don't include the original key in the node to save space (only key hash is needed)
         var newLeaf = CreateLeafNode(key, value, includeOriginalKey: false);
 
-        // Add the new leaf to nodes to persist
+        // Step 3: Add the new leaf to the list of nodes to persist
+        // The leaf is the starting point for path reconstruction
         var leafBlob = CreateNodeBlob(newLeaf, bitPath);
         nodesToPersist.Add(leafBlob);
 
-        // Reconstruct the path from leaf to root
+        // Step 4: Reconstruct the path from leaf to root using copy-on-write semantics
+        // This creates new internal nodes along the path while preserving sibling subtrees
+        // Only nodes on the update path are recreated; all other nodes remain unchanged
         var newRootHash = await UpdatePathAsync(
             bitPath,
             newLeaf.Hash,
@@ -605,6 +648,8 @@ public sealed class SparseMerkleTree
             nodesToPersist,
             cancellationToken);
 
+        // Return the new root hash and all nodes that need to be persisted
+        // The caller is responsible for writing these nodes to storage
         return new SmtUpdateResult(newRootHash, nodesToPersist);
     }
 
@@ -767,6 +812,12 @@ public sealed class SparseMerkleTree
     /// <summary>
     /// Helper method to update the path from a leaf to the root.
     /// </summary>
+    /// <remarks>
+    /// This method implements copy-on-write semantics for Sparse Merkle Trees:
+    /// 1. Traverse down from root to collect sibling hashes at each level
+    /// 2. Reconstruct the path bottom-up, creating new internal nodes
+    /// 3. Return the new root hash while preserving all unchanged subtrees
+    /// </remarks>
     private async Task<ReadOnlyMemory<byte>> UpdatePathAsync(
         bool[] bitPath,
         ReadOnlyMemory<byte> leafHash,
@@ -775,24 +826,29 @@ public sealed class SparseMerkleTree
         List<Persistence.SmtNodeBlob> nodesToPersist,
         CancellationToken cancellationToken)
     {
-        // First, traverse down from root to collect sibling hashes at each level
+        // Phase 1: Traverse down from root to collect sibling hashes at each level
+        // We need sibling hashes to reconstruct parent nodes during the upward pass
         var siblings = new ReadOnlyMemory<byte>[Depth];
         
-        // Check if tree is empty
+        // Check if we're starting with an empty tree (zero-hash at full tree height)
         bool treeIsEmpty = rootHash.Span.SequenceEqual(ZeroHashes[Depth]);
         
         if (!treeIsEmpty)
         {
             var traverseHash = rootHash;
             
+            // Traverse down the tree following the bit path to collect siblings
             for (int level = 0; level < Depth; level++)
             {
-                // Check if current node is a zero hash
+                // Check if current node is empty (zero-hash for this subtree height)
                 // At tree level `level` (0=root), current node represents subtree of height (Depth-level)
+                // For example: at level 0, we check ZeroHashes[Depth] (full tree)
+                //              at level 1, we check ZeroHashes[Depth-1] (one level down)
                 if (traverseHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
                 {
-                    // Rest of path is empty
-                    // When building at level i (bottom up), sibling at i needs zero hash for height (Depth-1-i)
+                    // Rest of path is empty - fill remaining siblings with appropriate zero-hashes
+                    // When building at loop level i (bottom up in reconstruction), sibling at i needs
+                    // the zero hash for a subtree of height (Depth-1-i)
                     for (int i = level; i < Depth; i++)
                     {
                         siblings[i] = ZeroHashes[Depth - 1 - i];
@@ -800,11 +856,12 @@ public sealed class SparseMerkleTree
                     break;
                 }
                 
-                // Read the current node
+                // Read the current node from storage
                 var nodeBlob = await nodeReader.ReadNodeByHashAsync(traverseHash, cancellationToken);
                 if (nodeBlob == null)
                 {
-                    // Node not found - rest of path is empty
+                    // Node not found in storage - treat rest of path as empty
+                    // This can happen when the tree is sparse or partially populated
                     for (int i = level; i < Depth; i++)
                     {
                         siblings[i] = ZeroHashes[Depth - 1 - i];
@@ -817,14 +874,17 @@ public sealed class SparseMerkleTree
                 if (node.NodeType == SmtNodeType.Internal)
                 {
                     var internalNode = (SmtInternalNode)node;
-                    // Get sibling hash (opposite of bit path direction)
+                    // Get the sibling hash (opposite direction from where we're going)
+                    // If bit path says go right (true), the sibling is the left child
+                    // If bit path says go left (false), the sibling is the right child
                     siblings[level] = bitPath[level] ? internalNode.LeftHash : internalNode.RightHash;
-                    // Move to child
+                    // Move to the child node indicated by the bit path
                     traverseHash = bitPath[level] ? internalNode.RightHash : internalNode.LeftHash;
                 }
                 else
                 {
-                    // Leaf or empty - rest of path uses zero hashes
+                    // Reached a leaf or empty node before expected depth
+                    // This happens when inserting into a sparse area - fill rest with zero-hashes
                     for (int i = level; i < Depth; i++)
                     {
                         siblings[i] = ZeroHashes[Depth - 1 - i];
@@ -835,39 +895,49 @@ public sealed class SparseMerkleTree
         }
         else
         {
-            // Empty tree - all siblings are zero hashes
-            // When building at loop level `level` (Depth-1 down to 0),
-            // At level (Depth-1), we create a node just above the leaf, sibling is height 0
-            // At level 0 (root), we create the root, sibling is height (Depth-1)
-            // So: siblings[level] = ZeroHashes[Depth - 1 - level]
+            // Starting with an empty tree - all siblings will be zero-hashes
+            // During reconstruction (bottom-up), at each level we need the appropriate zero-hash:
+            // - At level (Depth-1): creating node just above leaf, sibling is height 0 (leaf level)
+            // - At level (Depth-2): creating node two levels up, sibling is height 1
+            // - At level 0 (root): creating root node, sibling is height (Depth-1)
+            // Formula: siblings[level] = ZeroHashes[Depth - 1 - level]
             for (int level = 0; level < Depth; level++)
             {
                 siblings[level] = ZeroHashes[Depth - 1 - level];
             }
         }
         
-        // Now reconstruct from leaf to root
+        // Phase 2: Reconstruct the path from leaf to root (bottom-up)
+        // This creates new internal nodes along the update path using copy-on-write
         var currentHash = leafHash;
         
+        // Iterate from bottom (near leaf) to top (root)
+        // level ranges from (Depth-1) down to 0
         for (int level = Depth - 1; level >= 0; level--)
         {
             var siblingHash = siblings[level];
             var goRight = bitPath[level];
             
-            // Create new internal node
+            // Create a new internal node with currentHash and its sibling
+            // The bit path determines whether currentHash goes on left or right:
+            // - If goRight is false, currentHash is the left child, sibling is right
+            // - If goRight is true, currentHash is the right child, sibling is left
             var leftHash = goRight ? siblingHash.ToArray() : currentHash.ToArray();
             var rightHash = goRight ? currentHash.ToArray() : siblingHash.ToArray();
             var newInternal = CreateInternalNode(leftHash, rightHash);
             
-            // Add to nodes to persist
+            // Add the new internal node to the list of nodes to persist
+            // Include the path prefix (from root down to this level) for storage indexing
             var internalPath = new bool[level + 1];
             Array.Copy(bitPath, 0, internalPath, 0, level + 1);
             var internalBlob = CreateNodeBlob(newInternal, internalPath);
             nodesToPersist.Add(internalBlob);
             
+            // Move up one level - the newly created internal node becomes the current node
             currentHash = newInternal.Hash;
         }
         
+        // After traversing all levels, currentHash is now the new root hash
         return currentHash;
     }
 
@@ -932,22 +1002,27 @@ public sealed class SparseMerkleTree
         if (rootHash.IsEmpty)
             throw new ArgumentException("Root hash cannot be empty.", nameof(rootHash));
 
-        // Get the bit path and key hash for the key
+        // Step 1: Compute the bit path and key hash for the target key
         var bitPath = GetBitPath(key);
         var keyHash = HashKey(key);
 
-        // Collect sibling hashes along the path - use array indexed by traversal level
+        // Step 2: Initialize data structures for collecting sibling hashes
+        // siblings[i] stores the sibling hash at traversal level i
         var siblings = new byte[Depth][];
-        var bitmask = new byte[(Depth + 7) / 8];
+        // bitmask tracks which siblings are non-zero (for compression)
+        // Each bit corresponds to a verification level (bit 0 = level 0, etc.)
+        var bitmask = new byte[(Depth + 7) / 8]; // Ceiling division to get byte count
 
-        // Traverse the tree following the bit path
+        // Step 3: Traverse the tree from root to leaf following the bit path
         var currentHash = rootHash;
         for (int level = 0; level <= Depth; level++)
         {
-            // Check if we've reached an empty node (zero hash)
+            // Check if we've reached an empty subtree (indicated by zero-hash)
+            // At level 0 (root), check against ZeroHashes[Depth] (full tree height)
+            // At level i, check against ZeroHashes[Depth-i]
             if (level < Depth && currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
             {
-                // Key not found - empty path
+                // Empty path encountered - key does not exist, cannot generate inclusion proof
                 return null;
             }
 
@@ -972,27 +1047,36 @@ public sealed class SparseMerkleTree
                 }
 
                 // Found the leaf! We've collected all siblings along the path.
-                // Pad with zero-hashes to reach Depth siblings
+                // Step 6: Pad remaining levels with zero-hashes (for levels not traversed)
                 for (int i = level; i < Depth; i++)
                 {
+                    // At traversal level i, we need zero-hash for height (Depth - 1 - i)
                     siblings[i] = ZeroHashes[Depth - 1 - i];
+                    
+                    // Update bitmask if this zero-hash should be included in proof
                     if (!compress || !IsZeroHash(siblings[i], Depth - 1 - i))
                     {
-                        // Bitmask uses verification level
+                        // Convert traversal level to verification level for bitmask indexing
                         Proofs.SmtProof.SetBit(bitmask, Depth - 1 - i, true);
                     }
                 }
 
-                // Build final siblings array for proof
+                // Step 7: Build the final siblings array for the proof
+                // The siblings array is ordered by verification level (bottom-up, 0 to Depth-1)
+                // But we collected them by traversal level (top-down, 0 to Depth-1)
+                // So we need to reverse the indexing: verification_level = Depth - 1 - traversal_level
                 var proofSiblings = new List<byte[]>();
                 if (compress)
                 {
-                    // For compressed: only include siblings with bitmask bit set
+                    // For compressed proofs: only include siblings marked in bitmask (non-zero hashes)
+                    // This reduces proof size for sparse trees by omitting empty subtree hashes
                     for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
                     {
+                        // Check if the bit for this verification level is set in the bitmask
                         bool bitSet = (bitmask[verificationLevel / 8] & (1 << (verificationLevel % 8))) != 0;
                         if (bitSet)
                         {
+                            // Convert verification level back to traversal level to get the sibling
                             int traversalLevel = Depth - 1 - verificationLevel;
                             proofSiblings.Add(siblings[traversalLevel]);
                         }
@@ -1000,7 +1084,8 @@ public sealed class SparseMerkleTree
                 }
                 else
                 {
-                    // For uncompressed: include all siblings in verification order
+                    // For uncompressed proofs: include all siblings in verification order (bottom-up)
+                    // This is simpler but results in larger proofs
                     for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
                     {
                         int traversalLevel = Depth - 1 - verificationLevel;
@@ -1019,35 +1104,42 @@ public sealed class SparseMerkleTree
                     compress);
             }
 
-            // Must be an internal node - get sibling and continue
+            // Step 5: If we've reached an internal node, collect sibling and continue traversal
             if (node.NodeType == SmtNodeType.Internal)
             {
-                // If we've exhausted the bit path, we've gone too deep without finding a leaf
+                // Safety check: ensure we haven't exceeded the tree depth
                 if (level >= Depth)
                 {
+                    // Traversed too deep - malformed tree structure
                     return null;
                 }
 
                 var internalNode = (SmtInternalNode)node;
                 
-                // Determine which child to follow and which is the sibling
+                // Determine traversal direction and collect the sibling hash
                 bool goRight = bitPath[level];
+                // The sibling is the opposite child from where we're going
                 var siblingHash = goRight ? internalNode.LeftHash.ToArray() : internalNode.RightHash.ToArray();
                 
-                // Store sibling at traversal level
+                // Store sibling at the current traversal level
                 siblings[level] = siblingHash;
+                
+                // Update bitmask for compression (if enabled)
+                // For compressed proofs, we only include non-zero siblings
+                // Note: Bitmask indexing uses verification level (Depth - 1 - level)
+                // because verification proceeds bottom-up while traversal is top-down
                 if (!compress || !IsZeroHash(siblingHash, Depth - 1 - level))
                 {
-                    // Bitmask uses verification level
+                    // Set bit in bitmask to indicate this sibling should be included
                     Proofs.SmtProof.SetBit(bitmask, Depth - 1 - level, true);
                 }
 
-                // Move to the next level
+                // Move to the child indicated by the bit path
                 currentHash = goRight ? internalNode.RightHash : internalNode.LeftHash;
             }
             else
             {
-                // Empty node encountered - key not found
+                // Empty node encountered during traversal - key not found
                 return null;
             }
         }
@@ -1107,28 +1199,34 @@ public sealed class SparseMerkleTree
         var siblings = new byte[Depth][];
         var bitmask = new byte[(Depth + 7) / 8];
 
-        // Traverse the tree following the bit path
+        // Step 3: Traverse the tree from root following the bit path
         var currentHash = rootHash;
         for (int level = 0; level <= Depth; level++)
         {
-            // Check if we've reached an empty node (zero hash)
+            // Check if we've reached an empty subtree (zero-hash)
+            // This indicates the key's path leads to an unoccupied area of the tree
             if (level < Depth && currentHash.Span.SequenceEqual(ZeroHashes[Depth - level]))
             {
-                // Found empty path - fill remaining siblings with zero-hashes
+                // Empty Path Proof Case:
+                // The path to the target key consists entirely of empty nodes (zero-hashes)
+                // This definitively proves the key does not exist in the tree
+                
+                // Fill remaining levels with appropriate zero-hashes
                 for (int i = level; i < Depth; i++)
                 {
                     siblings[i] = ZeroHashes[Depth - 1 - i];
                     if (!compress || !IsZeroHash(siblings[i], Depth - 1 - i))
                     {
-                        // Bitmask uses verification level
+                        // Mark non-zero siblings in bitmask (uses verification level indexing)
                         Proofs.SmtProof.SetBit(bitmask, Depth - 1 - i, true);
                     }
                 }
 
-                // Build proof siblings in verification order
+                // Build the proof siblings array in verification order (bottom-up)
                 var proofSiblings = new List<byte[]>();
                 if (compress)
                 {
+                    // Compressed: only include siblings marked in bitmask
                     for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
                     {
                         bool bitSet = (bitmask[verificationLevel / 8] & (1 << (verificationLevel % 8))) != 0;
@@ -1141,6 +1239,7 @@ public sealed class SparseMerkleTree
                 }
                 else
                 {
+                    // Uncompressed: include all siblings
                     for (int verificationLevel = 0; verificationLevel < Depth; verificationLevel++)
                     {
                         int traversalLevel = Depth - 1 - verificationLevel;
@@ -1148,7 +1247,7 @@ public sealed class SparseMerkleTree
                     }
                 }
 
-                // Create empty path proof
+                // Create and return empty path non-inclusion proof
                 return new Proofs.SmtNonInclusionProof(
                     keyHash,
                     Depth,
@@ -1209,23 +1308,29 @@ public sealed class SparseMerkleTree
 
             var node = SmtNodeSerializer.Deserialize(nodeBlob.SerializedNode);
 
-            // If we've reached a leaf, check if it matches our key
+            // Step 4: If we've reached a leaf, check if it matches the target key
             if (node.NodeType == SmtNodeType.Leaf)
             {
                 var leafNode = (SmtLeafNode)node;
                 if (leafNode.KeyHash.Span.SequenceEqual(keyHash))
                 {
                     // Key exists in the tree - cannot generate non-inclusion proof
+                    // (Should use GenerateInclusionProofAsync instead)
                     return null;
                 }
 
-                // Key hash doesn't match - this is a leaf mismatch proof
+                // Leaf Mismatch Proof Case:
+                // The target key's path leads to a leaf containing a DIFFERENT key
+                // This proves the target key doesn't exist because another key occupies its position
+                // The conflicting leaf's key hash and value will be included in the proof
+                
+                // Fill remaining levels with zero-hashes (levels not traversed)
                 for (int i = level; i < Depth; i++)
                 {
                     siblings[i] = ZeroHashes[Depth - 1 - i];
                     if (!compress || !IsZeroHash(siblings[i], Depth - 1 - i))
                     {
-                        // Bitmask uses verification level
+                        // Mark non-zero siblings in bitmask (verification level indexing)
                         Proofs.SmtProof.SetBit(bitmask, Depth - 1 - i, true);
                     }
                 }

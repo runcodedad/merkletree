@@ -82,6 +82,7 @@ public sealed class SmtInclusionProof : SmtProof
     /// </remarks>
     public override bool Verify(byte[] expectedRootHash, IHashFunction hashFunction, ZeroHashTable zeroHashes)
     {
+        // Validate all required parameters are provided
         if (expectedRootHash == null)
             throw new ArgumentNullException(nameof(expectedRootHash));
         if (hashFunction == null)
@@ -89,40 +90,58 @@ public sealed class SmtInclusionProof : SmtProof
         if (zeroHashes == null)
             throw new ArgumentNullException(nameof(zeroHashes));
 
+        // Ensure the hash function matches what was used to generate the proof
         if (hashFunction.Name != HashAlgorithmId)
             throw new ArgumentException(
                 $"Hash function '{hashFunction.Name}' does not match proof algorithm '{HashAlgorithmId}'.",
                 nameof(hashFunction));
 
+        // Ensure the zero-hash table depth matches the proof depth
         if (zeroHashes.Depth != Depth)
             throw new ArgumentException(
                 $"Zero-hash table depth {zeroHashes.Depth} does not match proof depth {Depth}.",
                 nameof(zeroHashes));
 
-        // Get all sibling hashes (including reconstructed zero-hashes for compressed proofs)
+        // Get all sibling hashes needed for verification
+        // For compressed proofs, this reconstructs zero-hash siblings from the zero-hash table
+        // For uncompressed proofs, this just returns the stored sibling array
         var allSiblings = GetAllSiblingHashes(zeroHashes);
 
-        // Compute leaf hash with domain separation: Hash(0x00 || keyHash || value)
+        // Step 1: Compute the leaf hash using the key hash and value from the proof
+        // Leaf hash format: Hash(0x00 || keyHash || value)
+        // The 0x00 prefix is a domain separator that distinguishes leaf nodes from internal nodes
         var leafData = new byte[1 + KeyHash.Length + Value.Length];
         leafData[0] = 0x00; // Leaf domain separator
         Array.Copy(KeyHash, 0, leafData, 1, KeyHash.Length);
         Array.Copy(Value, 0, leafData, 1 + KeyHash.Length, Value.Length);
         var currentHash = hashFunction.ComputeHash(leafData);
 
-        // Get bit path for tree traversal
+        // Step 2: Get the bit path that determines traversal direction at each level
+        // The bit path is derived from the key hash and specifies left (false) or right (true) at each level
         var bitPath = GetBitPath();
 
-        // Traverse from leaf to root
+        // Step 3: Traverse from leaf to root, computing parent hashes at each level
+        // We iterate through verification levels (0 to Depth-1) from bottom to top
         for (int level = 0; level < Depth; level++)
         {
+            // Get the sibling hash at this verification level
             var siblingHash = allSiblings[level];
+            
+            // Determine if the current node is on the right side of its parent
+            // We read from the end of bitPath because:
+            // - bitPath[0] is the root level (first decision from root)
+            // - bitPath[Depth-1] is the leaf level (last decision before leaf)
+            // - level 0 in verification is the leaf level, so we use bitPath[Depth-1-level]
             var isRight = bitPath[Depth - 1 - level];
 
-            // Compute parent hash with domain separation: Hash(0x01 || left || right)
+            // Step 4: Compute parent hash with domain separation
+            // Internal node hash format: Hash(0x01 || leftHash || rightHash)
+            // The 0x01 prefix distinguishes internal nodes from leaf nodes (0x00)
             byte[] combinedData;
             if (isRight)
             {
                 // Current node is on the right, sibling is on the left
+                // Parent hash = Hash(0x01 || siblingHash || currentHash)
                 combinedData = new byte[1 + siblingHash.Length + currentHash.Length];
                 combinedData[0] = 0x01; // Internal node domain separator
                 Array.Copy(siblingHash, 0, combinedData, 1, siblingHash.Length);
@@ -131,16 +150,19 @@ public sealed class SmtInclusionProof : SmtProof
             else
             {
                 // Current node is on the left, sibling is on the right
+                // Parent hash = Hash(0x01 || currentHash || siblingHash)
                 combinedData = new byte[1 + currentHash.Length + siblingHash.Length];
                 combinedData[0] = 0x01; // Internal node domain separator
                 Array.Copy(currentHash, 0, combinedData, 1, currentHash.Length);
                 Array.Copy(siblingHash, 0, combinedData, 1 + currentHash.Length, siblingHash.Length);
             }
 
+            // Compute the hash for the parent node at the next level up
             currentHash = hashFunction.ComputeHash(combinedData);
         }
 
-        // Compare computed root with expected root
+        // Step 5: After traversing all levels, currentHash should be the root hash
+        // Compare the computed root with the expected root to verify the proof
         return currentHash.SequenceEqual(expectedRootHash);
     }
 
@@ -169,68 +191,71 @@ public sealed class SmtInclusionProof : SmtProof
     /// </remarks>
     public byte[] Serialize()
     {
+        // Prepare hash algorithm ID as UTF-8 bytes for serialization
         var algorithmIdBytes = System.Text.Encoding.UTF8.GetBytes(HashAlgorithmId);
+        
+        // Determine hash size from the first sibling hash if available, otherwise use key hash length
         int hashSize = SiblingHashes.Length > 0 ? SiblingHashes[0].Length : KeyHash.Length;
 
-        // Calculate total size
-        int totalSize = 1 + // version
-                       1 + // proof type
-                       1 + // flags
-                       4 + // depth
-                       4 + algorithmIdBytes.Length + // algorithm ID length + data
-                       4 + KeyHash.Length + // key hash length + data
-                       4 + Value.Length + // value length + data
-                       4 + SiblingBitmask.Length + // bitmask length + data
-                       4 + // sibling count
-                       (SiblingHashes.Length * hashSize); // sibling hashes
+        // Calculate total size of the serialized proof to allocate the exact buffer size needed
+        int totalSize = 1 + // version (1 byte)
+                       1 + // proof type (1 byte): 0x01 for inclusion
+                       1 + // flags (1 byte): bit 0 = IsCompressed
+                       4 + // depth (4 bytes, little-endian int32)
+                       4 + algorithmIdBytes.Length + // algorithm ID length (4 bytes) + UTF-8 bytes
+                       4 + KeyHash.Length + // key hash length (4 bytes) + hash bytes
+                       4 + Value.Length + // value length (4 bytes) + value bytes
+                       4 + SiblingBitmask.Length + // bitmask length (4 bytes) + bitmask bytes
+                       4 + // sibling count (4 bytes, int32)
+                       (SiblingHashes.Length * hashSize); // all sibling hashes concatenated
 
         var result = new byte[totalSize];
-        int offset = 0;
+        int offset = 0; // Track current write position in the buffer
 
-        // Write version
+        // Write version number (currently 1) - allows for future format changes
         result[offset++] = 1;
 
-        // Write proof type (0x01 = inclusion)
+        // Write proof type: 0x01 for inclusion proof (0x02 is used for non-inclusion proofs)
         result[offset++] = 0x01;
 
-        // Write flags
+        // Write flags byte: bit 0 indicates compression, other bits reserved for future use
         byte flags = 0;
-        if (IsCompressed) flags |= 0x01;
+        if (IsCompressed) flags |= 0x01; // Set bit 0 if proof uses compression
         result[offset++] = flags;
 
-        // Write depth
+        // Write tree depth as a 32-bit little-endian integer
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), Depth);
         offset += 4;
 
-        // Write hash algorithm ID
+        // Write hash algorithm ID: first the length, then the UTF-8 encoded string
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), algorithmIdBytes.Length);
         offset += 4;
         algorithmIdBytes.CopyTo(result, offset);
         offset += algorithmIdBytes.Length;
 
-        // Write key hash
+        // Write key hash: length-prefixed byte array
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), KeyHash.Length);
         offset += 4;
         KeyHash.CopyTo(result, offset);
         offset += KeyHash.Length;
 
-        // Write value
+        // Write value: length-prefixed byte array (the value being proven)
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), Value.Length);
         offset += 4;
         Value.CopyTo(result, offset);
         offset += Value.Length;
 
-        // Write sibling bitmask
+        // Write sibling bitmask: used for compressed proofs to track which siblings are zero-hashes
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), SiblingBitmask.Length);
         offset += 4;
         SiblingBitmask.CopyTo(result, offset);
         offset += SiblingBitmask.Length;
 
-        // Write sibling count
+        // Write count of sibling hashes that follow
         BinaryPrimitives.WriteInt32LittleEndian(result.AsSpan(offset), SiblingHashes.Length);
         offset += 4;
 
-        // Write sibling hashes
+        // Write all sibling hashes sequentially (no length prefix per hash, fixed size)
         for (int i = 0; i < SiblingHashes.Length; i++)
         {
             SiblingHashes[i].CopyTo(result, offset);
@@ -257,25 +282,26 @@ public sealed class SmtInclusionProof : SmtProof
                 "Data is too short to be a valid serialized inclusion proof.",
                 "INSUFFICIENT_DATA");
 
-        int offset = 0;
+        int offset = 0; // Track current read position in the data buffer
 
-        // Read version
+        // Read and validate version number (1 byte)
         byte version = data[offset++];
         if (version != 1)
             throw new Exceptions.MalformedProofException(
                 $"Unsupported serialization version: {version}. Expected version 1.",
                 "UNSUPPORTED_VERSION");
 
-        // Read proof type
+        // Read and validate proof type (1 byte)
+        // Must be 0x01 for inclusion proof
         byte proofType = data[offset++];
         if (proofType != 0x01)
             throw new Exceptions.MalformedProofException(
                 $"Invalid proof type: 0x{proofType:X2}. Expected 0x01 for inclusion proof.",
                 "INVALID_PROOF_TYPE");
 
-        // Read flags
+        // Read flags byte and extract compression flag from bit 0
         byte flags = data[offset++];
-        bool isCompressed = (flags & 0x01) != 0;
+        bool isCompressed = (flags & 0x01) != 0; // Test bit 0 for compression
 
         if (offset + 4 > data.Length)
             throw new Exceptions.MalformedProofException(
