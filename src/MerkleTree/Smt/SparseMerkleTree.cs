@@ -989,6 +989,96 @@ public sealed class SparseMerkleTree
                     break;
                 }
             }
+            
+            // After traversal, check if there's an existing leaf at this position (collision scenario)
+            // traverseHash now contains what would be at the leaf position after following the full path
+            if (!traverseHash.Span.SequenceEqual(ZeroHashes[0]))
+            {
+                // Non-zero hash at leaf position - check if it's an existing leaf
+                var potentialLeafBlob = await nodeReader.ReadNodeByHashAsync(traverseHash, cancellationToken);
+                if (potentialLeafBlob != null)
+                {
+                    var potentialLeaf = SmtNodeSerializer.Deserialize(potentialLeafBlob.SerializedNode);
+                    if (potentialLeaf.NodeType == SmtNodeType.Leaf)
+                    {
+                        // Collision! An existing leaf with same Depth-bit prefix
+                        var existingLeaf = (SmtLeafNode)potentialLeaf;
+                        var existingKeyHash = existingLeaf.KeyHash;
+                        
+                        // Compute full 256-bit paths to find where they diverge
+                        var fullNewBitPath = Hashing.HashUtils.GetBitPath(keyHash.ToArray(), 256);
+                        var fullExistingBitPath = Hashing.HashUtils.GetBitPath(existingKeyHash.ToArray(), 256);
+                        
+                        // Find divergence beyond Depth
+                        int fullDivergenceLevel = -1;
+                        for (int i = Depth; i < 256; i++)
+                        {
+                            if (fullNewBitPath[i] != fullExistingBitPath[i])
+                            {
+                                fullDivergenceLevel = i;
+                                break;
+                            }
+                        }
+                        
+                        if (fullDivergenceLevel == -1)
+                        {
+                            // Identical key hash - this is an update operation, not an insert
+                            // No collision extension needed, just replace the leaf normally
+                            // Fall through to normal reconstruction
+                        }
+                        else
+                        {
+                            
+                            // Build extension chain: internal node at divergence with both leaves
+                            var extLeftHash = fullNewBitPath[fullDivergenceLevel] ? existingLeaf.Hash.ToArray() : leafHash.ToArray();
+                            var extRightHash = fullNewBitPath[fullDivergenceLevel] ? leafHash.ToArray() : existingLeaf.Hash.ToArray();
+                            var extInternal = CreateInternalNode(extLeftHash, extRightHash);
+                            
+                            var extPath = new bool[fullDivergenceLevel + 1];
+                            Array.Copy(fullNewBitPath, 0, extPath, 0, fullDivergenceLevel + 1);
+                            nodesToPersist.Add(CreateNodeBlob(extInternal, extPath));
+                            
+                            var extCurrentHash = extInternal.Hash;
+                            
+                            // Build intermediate nodes from divergence-1 down to Depth
+                            for (int extLevel = fullDivergenceLevel - 1; extLevel >= Depth; extLevel--)
+                            {
+                                var extGoRight = fullNewBitPath[extLevel];
+                                var extLeft = extGoRight ? ZeroHashes[0].ToArray() : extCurrentHash.ToArray();
+                                var extRight = extGoRight ? extCurrentHash.ToArray() : ZeroHashes[0].ToArray();
+                                var extNode = CreateInternalNode(extLeft, extRight);
+                                
+                                var extNodePath = new bool[extLevel + 1];
+                                Array.Copy(fullNewBitPath, 0, extNodePath, 0, extLevel + 1);
+                                nodesToPersist.Add(CreateNodeBlob(extNode, extNodePath));
+                                
+                                extCurrentHash = extNode.Hash;
+                            }
+                            
+                            // The extension chain root replaces the new leaf in normal reconstruction
+                            // Reconstruct the path from extension root to tree root (bottom-up)
+                            var collisionCurrentHash = extCurrentHash;
+                            for (int level = Depth - 1; level >= 0; level--)
+                            {
+                                var siblingHash = siblings[level];
+                                var goRight = bitPath[level];
+                                
+                                var leftHash = goRight ? siblingHash.ToArray() : collisionCurrentHash.ToArray();
+                                var rightHash = goRight ? collisionCurrentHash.ToArray() : siblingHash.ToArray();
+                                var newInternal = CreateInternalNode(leftHash, rightHash);
+                                
+                                var internalPath = new bool[level + 1];
+                                Array.Copy(bitPath, 0, internalPath, 0, level + 1);
+                                nodesToPersist.Add(CreateNodeBlob(newInternal, internalPath));
+                                
+                                collisionCurrentHash = newInternal.Hash;
+                            }
+                            
+                            return collisionCurrentHash;
+                        }
+                    }
+                }
+            }
         }
         else
         {
