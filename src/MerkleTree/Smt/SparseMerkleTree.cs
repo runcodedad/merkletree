@@ -512,8 +512,9 @@ public sealed class SparseMerkleTree
         var keyHash = HashKey(key);
 
         // Step 2: Traverse the tree from root to leaf following the bit path
+        // Allow traversal beyond Depth to support extension nodes (up to 256 bits max)
         var currentHash = rootHash;
-        for (int level = 0; level <= Depth; level++)
+        for (int level = 0; level <= 256; level++)
         {
             // Check if we've reached an empty subtree (indicated by zero-hash)
             // At tree level `level` (0=root), we have a subtree of height (Depth-level)
@@ -553,16 +554,20 @@ public sealed class SparseMerkleTree
             // Step 5: If we've reached an internal node, follow the bit path to the next level
             if (node.NodeType == SmtNodeType.Internal)
             {
-                // Safety check: ensure we haven't exceeded the tree depth
-                if (level >= Depth)
+                // Allow traversal beyond configured Depth to support extension nodes
+                // Extension nodes are created when keys have identical depth-bit prefixes
+                // Safety check: don't traverse beyond reasonable bounds (256 bits for SHA-256)
+                if (level >= 256)
                 {
-                    // Traversed too deep without finding a leaf - malformed tree
+                    // Traversed too deep - likely indicates an issue
                     return SmtGetResult.CreateNotFound();
                 }
                 
                 var internalNode = (SmtInternalNode)node;
                 // Follow bit path: false (0) = left child, true (1) = right child
-                currentHash = bitPath[level] ? internalNode.RightHash : internalNode.LeftHash;
+                // For levels beyond bitPath length, treat as false (go left)
+                bool goRight = level < bitPath.Length && bitPath[level];
+                currentHash = goRight ? internalNode.RightHash : internalNode.LeftHash;
             }
             else
             {
@@ -643,6 +648,7 @@ public sealed class SparseMerkleTree
         var newRootHash = await UpdatePathAsync(
             bitPath,
             newLeaf.Hash,
+            newLeaf.KeyHash,  // Pass key hash for extension node creation
             rootHash,
             nodeReader,
             nodesToPersist,
@@ -693,12 +699,14 @@ public sealed class SparseMerkleTree
 
         var nodesToPersist = new List<Persistence.SmtNodeBlob>();
         var bitPath = GetBitPath(key);
+        var keyHash = _hashFunction.ComputeHash(key);
         var emptyNode = CreateEmptyNode(0);
 
         // Reconstruct the path from empty node to root
         var newRootHash = await UpdatePathAsync(
             bitPath,
             emptyNode.Hash,
+            keyHash,
             rootHash,
             nodeReader,
             nodesToPersist,
@@ -821,6 +829,7 @@ public sealed class SparseMerkleTree
     private async Task<ReadOnlyMemory<byte>> UpdatePathAsync(
         bool[] bitPath,
         ReadOnlyMemory<byte> leafHash,
+        ReadOnlyMemory<byte> keyHash,  // Key hash for computing full bit path when needed
         ReadOnlyMemory<byte> rootHash,
         Persistence.ISmtNodeReader nodeReader,
         List<Persistence.SmtNodeBlob> nodesToPersist,
@@ -904,24 +913,85 @@ public sealed class SparseMerkleTree
                     
                     // Find where the new key's path diverges from the existing leaf's path
                     // We know they match up to 'level-1', now find where they differ
+                    // Check beyond Depth to handle the case where paths are identical through all D bits
                     int divergenceLevel = level;
-                    while (divergenceLevel < Depth && bitPath[divergenceLevel] == existingBitPath[divergenceLevel])
+                    int maxCheckLevel = Math.Min(256, Math.Max(bitPath.Length, existingBitPath.Length)); // Check up to 256 bits max
+                    while (divergenceLevel < maxCheckLevel && 
+                           divergenceLevel < bitPath.Length &&
+                           divergenceLevel < existingBitPath.Length &&
+                           bitPath[divergenceLevel] == existingBitPath[divergenceLevel])
                     {
                         divergenceLevel++;
                     }
                     
-                    // Fill siblings for reconstruction:
-                    // - Levels from 'level' to 'divergenceLevel-1': paths match, sibling is zero-hash
-                    // - Level 'divergenceLevel': paths diverge, sibling is the existing leaf
-                    // - Levels after 'divergenceLevel': sibling is zero-hash
-                    
-                    for (int i = level; i < divergenceLevel && i < Depth; i++)
+                    // Handle the case where paths match through all Depth bits
+                    if (divergenceLevel >= Depth)
                     {
-                        siblings[i] = ZeroHashes[Depth - 1 - i];
+                        // Paths are identical through configured depth - need to extend the tree
+                        // Create extension nodes beyond Depth to separate the two leaves
+                        
+                        // Siblings from 'level' to 'Depth-1' were already collected during traversal
+                        // We keep those siblings to preserve the existing tree structure
+                        // NO need to fill with zero-hashes - we want to preserve existing nodes!
+                        
+                        // Build extension chain from Depth to divergenceLevel
+                        // Start with the new leaf hash
+                        var extensionHash = leafHash;
+                        
+                        // Build internal nodes from divergenceLevel down to Depth
+                        // This creates the "extension" part of the tree beyond configured depth
+                        for (int extLevel = divergenceLevel; extLevel >= Depth; extLevel--)
+                        {
+                            bool goRight = extLevel < bitPath.Length && bitPath[extLevel];
+                            bool existingGoRight = extLevel < existingBitPath.Length && existingBitPath[extLevel];
+                            
+                            if (extLevel == divergenceLevel)
+                            {
+                                // At divergence point: create node with both leaves as children
+                                var leftHash = goRight ? traverseHash.ToArray() : extensionHash.ToArray();
+                                var rightHash = goRight ? extensionHash.ToArray() : traverseHash.ToArray();
+                                var divergeNode = CreateInternalNode(leftHash, rightHash);
+                                
+                                // Store the extension node
+                                var extPath = new bool[Math.Min(extLevel + 1, bitPath.Length)];
+                                Array.Copy(bitPath, 0, extPath, 0, extPath.Length);
+                                nodesToPersist.Add(CreateNodeBlob(divergeNode, extPath));
+                                
+                                extensionHash = divergeNode.Hash;
+                            }
+                            else
+                            {
+                                // Create intermediate extension node
+                                // One child is the extension chain, other is zero-hash
+                                var leftHash = goRight ? ZeroHashes[0].ToArray() : extensionHash.ToArray();
+                                var rightHash = goRight ? extensionHash.ToArray() : ZeroHashes[0].ToArray();
+                                var extNode = CreateInternalNode(leftHash, rightHash);
+                                
+                                var extPath = new bool[Math.Min(extLevel + 1, bitPath.Length)];
+                                Array.Copy(bitPath, 0, extPath, 0, extPath.Length);
+                                nodesToPersist.Add(CreateNodeBlob(extNode, extPath));
+                                
+                                extensionHash = extNode.Hash;
+                            }
+                        }
+                        
+                        // The extension hash becomes the "leaf" for the normal reconstruction
+                        // Update the leaf hash to be the root of the extension chain
+                        leafHash = extensionHash;
                     }
-                    
-                    if (divergenceLevel < Depth)
+                    else
                     {
+                        // Normal case: paths diverge within configured Depth
+                        // Fill siblings for reconstruction:
+                        // - Levels from 'level' to 'divergenceLevel-1': paths match, sibling is zero-hash
+                        // - Level 'divergenceLevel': paths diverge, sibling is the existing leaf
+                        // - Levels after 'divergenceLevel': sibling is zero-hash
+                        
+                        for (int i = level; i < divergenceLevel && i < Depth; i++)
+                        {
+                            siblings[i] = ZeroHashes[Depth - 1 - i];
+                        }
+                        
                         // At divergence level, the existing leaf goes in the opposite direction
                         // So it becomes the sibling for our path
                         siblings[divergenceLevel] = traverseHash; // traverseHash is the existing leaf's hash
@@ -943,6 +1013,74 @@ public sealed class SparseMerkleTree
                         siblings[i] = ZeroHashes[Depth - 1 - i];
                     }
                     break;
+                }
+            }
+            
+            // Check if traversal ended at a potential leaf (after going through all Depth levels)
+            // This handles the case where we need to check for collision with an existing leaf
+            if (!treeIsEmpty && traverseHash.Length > 0)
+            {
+                // Try to read the node we ended at
+                var finalNodeBlob = await nodeReader.ReadNodeByHashAsync(traverseHash, cancellationToken);
+                if (finalNodeBlob != null)
+                {
+                    var finalNode = SmtNodeSerializer.Deserialize(finalNodeBlob.SerializedNode);
+                    if (finalNode.NodeType == SmtNodeType.Leaf)
+                    {
+                        // We ended at a leaf - this means collision handling is needed
+                        var existingLeaf = (SmtLeafNode)finalNode;
+                        
+                        // Get the existing leaf's bit path (full 256 bits for proper divergence detection)
+                        var existingKeyFullBitPath = HashUtils.GetBitPath(existingLeaf.KeyHash.ToArray(), 256);
+                        
+                        // Get the new key's full bit path (up to 256 bits)
+                        var newKeyFullBitPath = HashUtils.GetBitPath(keyHash.ToArray(), 256);
+                        
+                        // Find where paths diverge (checking beyond Depth)
+                        int divergenceLevel = Depth;
+                        while (divergenceLevel < 256 && 
+                               newKeyFullBitPath[divergenceLevel] == existingKeyFullBitPath[divergenceLevel])
+                        {
+                            divergenceLevel++;
+                        }
+                        
+                        // Build extension chain from divergenceLevel down to Depth
+                        var extensionHash = leafHash;
+                        for (int extLevel = divergenceLevel; extLevel >= Depth; extLevel--)
+                        {
+                            bool newKeyGoesRight = extLevel < newKeyFullBitPath.Length && newKeyFullBitPath[extLevel];
+                            
+                            if (extLevel == divergenceLevel)
+                            {
+                                // At divergence: create node with both leaves
+                                var leftHash = newKeyGoesRight ? traverseHash.ToArray() : extensionHash.ToArray();
+                                var rightHash = newKeyGoesRight ? extensionHash.ToArray() : traverseHash.ToArray();
+                                var divergeNode = CreateInternalNode(leftHash, rightHash);
+                                
+                                var extPath = new bool[Math.Min(extLevel + 1, bitPath.Length)];
+                                Array.Copy(bitPath, 0, extPath, 0, extPath.Length);
+                                nodesToPersist.Add(CreateNodeBlob(divergeNode, extPath));
+                                
+                                extensionHash = divergeNode.Hash;
+                            }
+                            else
+                            {
+                                // Intermediate extension node
+                                var leftHash = newKeyGoesRight ? ZeroHashes[0].ToArray() : extensionHash.ToArray();
+                                var rightHash = newKeyGoesRight ? extensionHash.ToArray() : ZeroHashes[0].ToArray();
+                                var extNode = CreateInternalNode(leftHash, rightHash);
+                                
+                                var extPath = new bool[Math.Min(extLevel + 1, bitPath.Length)];
+                                Array.Copy(bitPath, 0, extPath, 0, extPath.Length);
+                                nodesToPersist.Add(CreateNodeBlob(extNode, extPath));
+                                
+                                extensionHash = extNode.Hash;
+                            }
+                        }
+                        
+                        // Use extension chain root as the leaf for reconstruction
+                        leafHash = extensionHash;
+                    }
                 }
             }
         }
