@@ -56,25 +56,38 @@ jobs:
         echo "Checking for prohibited using directives in source files..."
         
         # Check for database-specific imports
-        if grep -r "using System\.Data\.SqlClient\|using System\.Data\.Common\|using Npgsql\|using MongoDB\.Driver\|using MongoDB\.Bson\|using MySql\.Data\|using Microsoft\.Data\.Sqlite" src/MerkleTree --include="*.cs" 2>/dev/null; then
+        if grep -r "using System\.Data\.SqlClient" src/MerkleTree --include="*.cs" 2>/dev/null || \
+           grep -r "using System\.Data\.Common" src/MerkleTree --include="*.cs" 2>/dev/null || \
+           grep -r "using Npgsql" src/MerkleTree --include="*.cs" 2>/dev/null || \
+           grep -r "using MongoDB\.Driver" src/MerkleTree --include="*.cs" 2>/dev/null || \
+           grep -r "using MongoDB\.Bson" src/MerkleTree --include="*.cs" 2>/dev/null || \
+           grep -r "using MySql\.Data" src/MerkleTree --include="*.cs" 2>/dev/null || \
+           grep -r "using Microsoft\.Data\.Sqlite" src/MerkleTree --include="*.cs" 2>/dev/null; then
           echo "❌ ERROR: Prohibited database import found in source files"
           exit 1
         fi
         
         # Check for Entity Framework imports
-        if grep -r "using Microsoft\.EntityFrameworkCore\|using Dapper" src/MerkleTree --include="*.cs" 2>/dev/null; then
+        if grep -r "using Microsoft\.EntityFrameworkCore" src/MerkleTree --include="*.cs" 2>/dev/null || \
+           grep -r "using Dapper" src/MerkleTree --include="*.cs" 2>/dev/null; then
           echo "❌ ERROR: Prohibited ORM import found in source files"
           exit 1
         fi
         
         # Check for blockchain-specific imports
-        if grep -r "using Nethereum\|using NBitcoin\|using Solnet" src/MerkleTree --include="*.cs" 2>/dev/null; then
+        if grep -r "using Nethereum" src/MerkleTree --include="*.cs" 2>/dev/null || \
+           grep -r "using NBitcoin" src/MerkleTree --include="*.cs" 2>/dev/null || \
+           grep -r "using Solnet" src/MerkleTree --include="*.cs" 2>/dev/null; then
           echo "❌ ERROR: Prohibited blockchain import found in source files"
           exit 1
         fi
         
         # Check for cloud provider imports (except Azure.Core for abstractions)
-        if grep -r "using Amazon\|using Microsoft\.Azure\.Cosmos\|using Azure\.Storage\|using Azure\.Data\|using Google\.Cloud" src/MerkleTree --include="*.cs" 2>/dev/null; then
+        if grep -r "using Amazon" src/MerkleTree --include="*.cs" 2>/dev/null || \
+           grep -r "using Microsoft\.Azure\.Cosmos" src/MerkleTree --include="*.cs" 2>/dev/null || \
+           grep -r "using Azure\.Storage" src/MerkleTree --include="*.cs" 2>/dev/null || \
+           grep -r "using Azure\.Data" src/MerkleTree --include="*.cs" 2>/dev/null || \
+           grep -r "using Google\.Cloud" src/MerkleTree --include="*.cs" 2>/dev/null; then
           echo "❌ ERROR: Prohibited cloud provider import found in source files"
           exit 1
         fi

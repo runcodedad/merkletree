@@ -288,7 +288,13 @@ public async Task SparseMerkleTree_InsertAndGet_ReturnsCorrectValue()
     // Arrange - Use in-memory storage, no external dependencies
     var storage = new InMemorySmtStorage();
     var hashFunction = new Sha256HashFunction();
-    var tree = new SparseMerkleTree(hashFunction, storage, storage, storage, storage);
+    var tree = new SparseMerkleTree(
+        hashFunction, 
+        storage,  // reader
+        storage,  // writer
+        storage,  // snapshot manager
+        storage   // metadata store
+    );
     
     var key = Encoding.UTF8.GetBytes("test-key");
     var value = Encoding.UTF8.GetBytes("test-value");
