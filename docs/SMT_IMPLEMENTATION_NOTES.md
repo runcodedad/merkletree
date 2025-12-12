@@ -83,36 +83,57 @@ All failing tests involve retrieving values after insertion:
 - `BatchUpdateAsync_WithDeletes_AppliesCorrectly`
 - `BatchUpdateAsync_ConflictingUpdates_LastWriteWins`
 
-### Confirmed Root Cause
+### Confirmed Root Cause: Depth-Limited Collision Handling
 
-**Issue**: Keys with shared bit-path prefixes cause tree corruption
+**Critical Issue**: Keys with identical depth-bit prefixes cannot coexist in the tree
 
-**Example**:
-- Key 0: bit path `10101111` 
-- Key 1: bit path `10100001` 
-- They share the prefix `101000` (first 6 bits match)
-- After inserting both keys, Key 0 remains retrievable but Key 1 is not found
+**The Fundamental Problem**:
+The current SMT implementation uses a fixed depth D and only creates D levels of internal nodes (levels 0 through D-1). When two keys have IDENTICAL bit paths through all D levels (same D-bit prefix), only the most recently inserted key remains accessible.
 
-**Analysis**:
-When inserting Key 0 into an empty tree, internal nodes are created along its path with zero-hash siblings for empty branches. When inserting Key 1 which shares a prefix:
+**Concrete Example**:
+- Tree depth: 8
+- Key 1: bit path `10100001 1111...` (first 8 bits)
+- Key 2: bit path `10100001 0111...` (SAME first 8 bits, diverges at bit 8)
+- After inserting Key 1: retrievable ✓
+- After inserting Key 2: Key 2 retrievable ✓, but Key 1 NOT retrievable ✗
 
-1. UpdatePathAsync traverses down following Key 1's bit path
-2. At the point where paths diverge (level 6 in example), it finds a zero-hash
-3. The algorithm treats this as an empty branch and creates new nodes
-4. However, Key 0's leaf exists deeper in the tree on a different branch
-5. The tree structure becomes inconsistent - Key 0's nodes still exist but are no longer reachable from the new root
+**What Happens During Key 2 Insert**:
+1. Traversal follows the path `10100001` through levels 0-7
+2. At each level, both keys go the same direction (share all 8 bits)
+3. Siblings are collected correctly (zero-hashes since path matches)
+4. Reconstruction creates new internal nodes at levels 0-7
+5. At level 7, new node is created with children based on bit 7
+6. But both keys have the same bit 7! So level 7 node points to Key 2's leaf
+7. Key 1's leaf is still in storage but unreachable from new root
 
-**The Core Problem**:
-The current implementation doesn't handle "tree splitting" when keys collide at a prefix level. In an SMT, when two keys share a prefix, the tree must be restructured to accommodate both leaves at their proper depths, with shared internal nodes for the common prefix and branching at the divergence point.
+**Why Immediate Retrieval Works**:
+Immediate retrieval after Key 2 insert works because the tree is freshly built for Key 2. But Key 1's path through the tree has been overwritten by Key 2's path.
 
-**What Should Happen**:
-1. Detect when a new key's path intersects with an existing key's path
-2. Restructure the tree to push both leaves to their correct full-depth positions
-3. Create intermediate internal nodes connecting both branches
-4. Ensure all nodes along both paths are properly maintained
+**Root Cause Analysis**:
+The implementation doesn't extend beyond depth D. When keys have paths that diverge at bit D or later, the tree structure can't accommodate both keys. Only D levels of internal nodes are created (0 through D-1), and leaves are conceptually at level D. Two keys with identical D-bit prefixes need to diverge at level D or deeper, but the tree doesn't create nodes that deep.
 
 **Current Behavior**:
-Lines 884-893 in UpdatePathAsync treat any non-internal node as terminal, filling remaining siblings with zero-hashes. This works for empty trees but fails when an existing structure needs reorganization.
+- Insert creates D internal nodes + 1 leaf (9 nodes for depth 8)
+- Each insert with the same D-bit prefix overwrites the previous tree path
+- Old leaves remain in storage but are orphaned (unreachable from new root)
+- Copy-on-write creates new nodes, but doesn't preserve paths for colliding prefixes
+
+**What Should Happen** (Standard SMT Design):
+1. When two keys have the same D-bit prefix, create internal nodes beyond level D-1
+2. Continue creating internal nodes until paths diverge
+3. Both leaves become children (directly or indirectly) of the divergence point
+4. Tree effectively has depth > D for certain branches
+
+**Alternative Solutions**:
+1. **Dynamic Depth Extension**: Allow tree to grow beyond configured depth when needed
+2. **Leaf Chaining**: At collision points, use a linked list or secondary structure
+3. **Deeper Tree**: Use larger fixed depth (e.g., 256 for SHA-256) to minimize collisions
+4. **Error on Collision**: Detect and reject keys with identical D-bit prefixes
+
+**Test Coverage**:
+- `SmtCollisionTest.TwoKeysWithIdenticalDepthBitPrefix_BothShouldBeRetrievable`: Demonstrates the bug
+- `SmtPropertyTests.Property_MultipleInserts_AllKeysRetrievable`: Fails due to this issue
+- `SmtDebugTest.Debug_FiveInserts_AllShouldBeRetrievable`: Shows Keys 1 & 2 collision
 
 ## Next Steps for Debugging
 
