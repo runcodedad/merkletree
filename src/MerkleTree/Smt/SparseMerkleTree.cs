@@ -1019,10 +1019,46 @@ public sealed class SparseMerkleTree
             }
             
             // Check if traversal ended at a potential leaf (after going through all Depth levels)
-            // This handles the case where we need to check for collision with an existing leaf
+            // For nested collisions (3+ keys with same prefix), we need to continue traversing
+            // through extension nodes until we reach a leaf
             if (!treeIsEmpty && traverseHash.Length > 0)
             {
-                // Try to read the node we ended at
+                // Get full bit path for traversing beyond Depth
+                var fullBitPath = HashUtils.GetBitPath(keyHash.ToArray(), 256);
+                
+                // Continue traversing through extension nodes (levels Depth and beyond) until we hit a leaf
+                int extensionLevel = Depth;
+                while (extensionLevel < 256)
+                {
+                    var nodeBlob = await nodeReader.ReadNodeByHashAsync(traverseHash, cancellationToken);
+                    if (nodeBlob == null)
+                    {
+                        // Node not found - tree might be empty at this path
+                        break;
+                    }
+                    
+                    var node = SmtNodeSerializer.Deserialize(nodeBlob.SerializedNode);
+                    if (node.NodeType == SmtNodeType.Leaf)
+                    {
+                        // Reached a leaf - check for collision
+                        break;
+                    }
+                    else if (node.NodeType == SmtNodeType.Internal)
+                    {
+                        // Continue traversing through the extension
+                        var internalNode = (SmtInternalNode)node;
+                        bool goRight = extensionLevel < fullBitPath.Length && fullBitPath[extensionLevel];
+                        traverseHash = goRight ? internalNode.RightHash : internalNode.LeftHash;
+                        extensionLevel++;
+                    }
+                    else
+                    {
+                        // Empty node or unexpected type
+                        break;
+                    }
+                }
+                
+                // Now check if we ended at a leaf that collides with our new key
                 var finalNodeBlob = await nodeReader.ReadNodeByHashAsync(traverseHash, cancellationToken);
                 if (finalNodeBlob != null)
                 {
