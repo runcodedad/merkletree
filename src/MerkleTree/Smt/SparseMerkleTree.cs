@@ -990,19 +990,237 @@ public sealed class SparseMerkleTree
                 }
             }
             
-            // After traversal, check if there's an existing leaf at this position (collision scenario)
-            // traverseHash now contains what would be at the leaf position after following the full path
+            // After traversal through Depth levels, check if we need to continue beyond Depth
+            // This handles extension nodes created by previous collision insertions
             if (!traverseHash.Span.SequenceEqual(ZeroHashes[0]))
             {
-                // Non-zero hash at leaf position - check if it's an existing leaf
-                var potentialLeafBlob = await nodeReader.ReadNodeByHashAsync(traverseHash, cancellationToken);
-                if (potentialLeafBlob != null)
+                // Non-zero hash at depth boundary - check what type of node it is
+                var nodeAtDepth = await nodeReader.ReadNodeByHashAsync(traverseHash, cancellationToken);
+                if (nodeAtDepth != null)
                 {
-                    var potentialLeaf = SmtNodeSerializer.Deserialize(potentialLeafBlob.SerializedNode);
-                    if (potentialLeaf.NodeType == SmtNodeType.Leaf)
+                    var node = SmtNodeSerializer.Deserialize(nodeAtDepth.SerializedNode);
+                    
+                    if (node.NodeType == SmtNodeType.Internal)
+                    {
+                        // Extension node exists - continue traversing beyond Depth
+                        // This handles the case of inserting a third+ key with the same Depth-bit prefix
+                        var fullNewBitPath = Hashing.HashUtils.GetBitPath(keyHash.ToArray(), 256);
+                        var currentExtensionHash = traverseHash;
+                        
+                        // Traverse through extension chain until we find a leaf or empty spot
+                        for (int extLevel = Depth; extLevel < 256; extLevel++)
+                        {
+                            var extNodeBlob = await nodeReader.ReadNodeByHashAsync(currentExtensionHash, cancellationToken);
+                            if (extNodeBlob == null)
+                            {
+                                // Node not found - shouldn't happen in a valid tree
+                                break;
+                            }
+                            
+                            var extNode = SmtNodeSerializer.Deserialize(extNodeBlob.SerializedNode);
+                            
+                            if (extNode.NodeType == SmtNodeType.Leaf)
+                            {
+                                var existingLeaf = (SmtLeafNode)extNode;
+                                var existingKeyHash = existingLeaf.KeyHash;
+                                
+                                // Check if this is an update (same key) or collision (different key)
+                                if (existingKeyHash.Span.SequenceEqual(keyHash.Span))
+                                {
+                                    // Update existing key - replace the leaf at this extension level
+                                    // Need to rebuild from this point back up to root
+                                    // For simplicity, we'll rebuild the entire extension chain
+                                    // Store the extension level where we found the match
+                                    var matchLevel = extLevel;
+                                    
+                                    // Collect siblings from Depth to matchLevel during a fresh traversal
+                                    var extensionSiblings = new List<ReadOnlyMemory<byte>>();
+                                    var retraverseHash = traverseHash;
+                                    for (int retraverseLevel = Depth; retraverseLevel < matchLevel; retraverseLevel++)
+                                    {
+                                        var retraverseBlob = await nodeReader.ReadNodeByHashAsync(retraverseHash, cancellationToken);
+                                        if (retraverseBlob == null) break;
+                                        
+                                        var retraverseNode = SmtNodeSerializer.Deserialize(retraverseBlob.SerializedNode);
+                                        if (retraverseNode.NodeType == SmtNodeType.Internal)
+                                        {
+                                            var retraverseInternal = (SmtInternalNode)retraverseNode;
+                                            var goRight = fullNewBitPath[retraverseLevel];
+                                            extensionSiblings.Add(goRight ? retraverseInternal.LeftHash : retraverseInternal.RightHash);
+                                            retraverseHash = goRight ? retraverseInternal.RightHash : retraverseInternal.LeftHash;
+                                        }
+                                        else
+                                        {
+                                            break;
+                                        }
+                                    }
+                                    
+                                    // Rebuild extension chain from leaf up to Depth
+                                    var rebuildHash = leafHash;
+                                    for (int rebuildLevel = extensionSiblings.Count - 1; rebuildLevel >= 0; rebuildLevel--)
+                                    {
+                                        var actualLevel = Depth + rebuildLevel;
+                                        var siblingHash = extensionSiblings[rebuildLevel];
+                                        var goRight = fullNewBitPath[actualLevel];
+                                        
+                                        var leftHash = goRight ? siblingHash.ToArray() : rebuildHash.ToArray();
+                                        var rightHash = goRight ? rebuildHash.ToArray() : siblingHash.ToArray();
+                                        var newInternal = CreateInternalNode(leftHash, rightHash);
+                                        
+                                        var internalPath = new bool[actualLevel + 1];
+                                        Array.Copy(fullNewBitPath, 0, internalPath, 0, actualLevel + 1);
+                                        nodesToPersist.Add(CreateNodeBlob(newInternal, internalPath));
+                                        
+                                        rebuildHash = newInternal.Hash;
+                                    }
+                                    
+                                    // Now rebuild from Depth to root using collected siblings
+                                    var updateCurrentHash = rebuildHash;
+                                    for (int level = Depth - 1; level >= 0; level--)
+                                    {
+                                        var siblingHash = siblings[level];
+                                        var goRight = bitPath[level];
+                                        
+                                        var leftHash = goRight ? siblingHash.ToArray() : updateCurrentHash.ToArray();
+                                        var rightHash = goRight ? updateCurrentHash.ToArray() : siblingHash.ToArray();
+                                        var newInternal = CreateInternalNode(leftHash, rightHash);
+                                        
+                                        var internalPath = new bool[level + 1];
+                                        Array.Copy(bitPath, 0, internalPath, 0, level + 1);
+                                        nodesToPersist.Add(CreateNodeBlob(newInternal, internalPath));
+                                        
+                                        updateCurrentHash = newInternal.Hash;
+                                    }
+                                    
+                                    return updateCurrentHash;
+                                }
+                                else
+                                {
+                                    // Collision with different key in extension chain
+                                    // Find where the new key diverges from the existing key
+                                    var fullExistingBitPath = Hashing.HashUtils.GetBitPath(existingKeyHash.ToArray(), 256);
+                                    
+                                    int divergenceLevel = -1;
+                                    for (int i = extLevel; i < 256; i++)
+                                    {
+                                        if (fullNewBitPath[i] != fullExistingBitPath[i])
+                                        {
+                                            divergenceLevel = i;
+                                            break;
+                                        }
+                                    }
+                                    
+                                    if (divergenceLevel == -1)
+                                    {
+                                        // Should not happen - identical hashes
+                                        throw new InvalidOperationException("Cannot insert duplicate key with identical hash");
+                                    }
+                                    
+                                    // Build new extension from divergence point
+                                    var divLeftHash = fullNewBitPath[divergenceLevel] ? existingLeaf.Hash.ToArray() : leafHash.ToArray();
+                                    var divRightHash = fullNewBitPath[divergenceLevel] ? leafHash.ToArray() : existingLeaf.Hash.ToArray();
+                                    var divInternal = CreateInternalNode(divLeftHash, divRightHash);
+                                    
+                                    var divPath = new bool[divergenceLevel + 1];
+                                    Array.Copy(fullNewBitPath, 0, divPath, 0, divergenceLevel + 1);
+                                    nodesToPersist.Add(CreateNodeBlob(divInternal, divPath));
+                                    
+                                    var divCurrentHash = divInternal.Hash;
+                                    
+                                    // Build intermediate nodes from divergence-1 down to extLevel
+                                    for (int intermediateLevel = divergenceLevel - 1; intermediateLevel >= extLevel; intermediateLevel--)
+                                    {
+                                        var goRight = fullNewBitPath[intermediateLevel];
+                                        var leftHash = goRight ? ZeroHashes[0].ToArray() : divCurrentHash.ToArray();
+                                        var rightHash = goRight ? divCurrentHash.ToArray() : ZeroHashes[0].ToArray();
+                                        var intermediateNode = CreateInternalNode(leftHash, rightHash);
+                                        
+                                        var intermediatePath = new bool[intermediateLevel + 1];
+                                        Array.Copy(fullNewBitPath, 0, intermediatePath, 0, intermediateLevel + 1);
+                                        nodesToPersist.Add(CreateNodeBlob(intermediateNode, intermediatePath));
+                                        
+                                        divCurrentHash = intermediateNode.Hash;
+                                    }
+                                    
+                                    // Collect siblings from Depth to extLevel
+                                    var extensionSiblings = new List<ReadOnlyMemory<byte>>();
+                                    var retraverseHash = traverseHash;
+                                    for (int retraverseLevel = Depth; retraverseLevel < extLevel; retraverseLevel++)
+                                    {
+                                        var retraverseBlob = await nodeReader.ReadNodeByHashAsync(retraverseHash, cancellationToken);
+                                        if (retraverseBlob == null) break;
+                                        
+                                        var retraverseNode = SmtNodeSerializer.Deserialize(retraverseBlob.SerializedNode);
+                                        if (retraverseNode.NodeType == SmtNodeType.Internal)
+                                        {
+                                            var retraverseInternal = (SmtInternalNode)retraverseNode;
+                                            var goRight = fullNewBitPath[retraverseLevel];
+                                            extensionSiblings.Add(goRight ? retraverseInternal.LeftHash : retraverseInternal.RightHash);
+                                            retraverseHash = goRight ? retraverseInternal.RightHash : retraverseInternal.LeftHash;
+                                        }
+                                        else
+                                        {
+                                            break;
+                                        }
+                                    }
+                                    
+                                    // Rebuild extension chain from divCurrentHash up to Depth
+                                    var rebuildHash = divCurrentHash;
+                                    for (int rebuildLevel = extensionSiblings.Count - 1; rebuildLevel >= 0; rebuildLevel--)
+                                    {
+                                        var actualLevel = Depth + rebuildLevel;
+                                        var siblingHash = extensionSiblings[rebuildLevel];
+                                        var goRight = fullNewBitPath[actualLevel];
+                                        
+                                        var leftHash = goRight ? siblingHash.ToArray() : rebuildHash.ToArray();
+                                        var rightHash = goRight ? rebuildHash.ToArray() : siblingHash.ToArray();
+                                        var newInternal = CreateInternalNode(leftHash, rightHash);
+                                        
+                                        var internalPath = new bool[actualLevel + 1];
+                                        Array.Copy(fullNewBitPath, 0, internalPath, 0, actualLevel + 1);
+                                        nodesToPersist.Add(CreateNodeBlob(newInternal, internalPath));
+                                        
+                                        rebuildHash = newInternal.Hash;
+                                    }
+                                    
+                                    // Rebuild from Depth to root
+                                    var collisionCurrentHash2 = rebuildHash;
+                                    for (int level = Depth - 1; level >= 0; level--)
+                                    {
+                                        var siblingHash = siblings[level];
+                                        var goRight = bitPath[level];
+                                        
+                                        var leftHash = goRight ? siblingHash.ToArray() : collisionCurrentHash2.ToArray();
+                                        var rightHash = goRight ? collisionCurrentHash2.ToArray() : siblingHash.ToArray();
+                                        var newInternal = CreateInternalNode(leftHash, rightHash);
+                                        
+                                        var internalPath = new bool[level + 1];
+                                        Array.Copy(bitPath, 0, internalPath, 0, level + 1);
+                                        nodesToPersist.Add(CreateNodeBlob(newInternal, internalPath));
+                                        
+                                        collisionCurrentHash2 = newInternal.Hash;
+                                    }
+                                    
+                                    return collisionCurrentHash2;
+                                }
+                            }
+                            else if (extNode.NodeType == SmtNodeType.Internal)
+                            {
+                                // Continue traversing
+                                var internalNode = (SmtInternalNode)extNode;
+                                currentExtensionHash = fullNewBitPath[extLevel] ? internalNode.RightHash : internalNode.LeftHash;
+                            }
+                            else
+                            {
+                                // Empty node in extension chain - shouldn't happen
+                                break;
+                            }
+                        }
+                    }
+                    else if (node.NodeType == SmtNodeType.Leaf)
                     {
                         // Collision! An existing leaf with same Depth-bit prefix
-                        var existingLeaf = (SmtLeafNode)potentialLeaf;
+                        var existingLeaf = (SmtLeafNode)node;
                         var existingKeyHash = existingLeaf.KeyHash;
                         
                         // Compute full 256-bit paths to find where they diverge
@@ -1028,7 +1246,6 @@ public sealed class SparseMerkleTree
                         }
                         else
                         {
-                            
                             // Build extension chain: internal node at divergence with both leaves
                             var extLeftHash = fullNewBitPath[fullDivergenceLevel] ? existingLeaf.Hash.ToArray() : leafHash.ToArray();
                             var extRightHash = fullNewBitPath[fullDivergenceLevel] ? leafHash.ToArray() : existingLeaf.Hash.ToArray();
