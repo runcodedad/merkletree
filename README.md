@@ -526,6 +526,8 @@ For detailed testing information, see [Testing Guide](docs/TESTING.md).
 
 For detailed information, see:
 
+- [Contributing Guide](docs/CONTRIBUTING.md) - Architecture constraints, design principles, and contribution guidelines
+- [Storage Adapter Patterns](docs/ADAPTER_PATTERNS.md) - Reference patterns for implementing storage adapters
 - [Testing Guide](docs/TESTING.md) - Comprehensive testing documentation and patterns
 - [Proof Generation Documentation](docs/PROOF_GENERATION.md) - Complete guide to generating and verifying Merkle proofs
 - [Proof Serialization Format](docs/PROOF_SERIALIZATION.md) - Binary serialization format specification
@@ -536,9 +538,50 @@ For detailed information, see:
 - XML documentation comments in the source code
 - IntelliSense in your IDE
 
+## Architecture Principles
+
+This library follows strict architectural constraints to ensure maximum portability and flexibility:
+
+### Storage Agnostic
+The core library **never** directly depends on specific databases, file systems, or storage implementations. Instead, it provides interfaces (like `ISmtNodeReader`, `ISmtNodeWriter`) that you can implement with any storage backend of your choice.
+
+### Blockchain Neutral
+The library provides cryptographic primitives without coupling to any specific blockchain platform. It's useful for blockchain applications, distributed systems, version control, data integrity verification, and more.
+
+### Interface-Based Design
+All external dependencies are abstracted behind interfaces, enabling:
+- Dependency injection and testing
+- Multiple implementations (in-memory, database, cloud, etc.)
+- Clean separation of concerns
+
+**Example - You implement your own storage adapter:**
+
+```csharp
+// Your application code implements the interface
+public class MyDatabaseAdapter : ISmtNodeReader, ISmtNodeWriter
+{
+    // Your database logic here (EF Core, Dapper, MongoDB, etc.)
+}
+
+// Use your adapter with the library
+var storage = new MyDatabaseAdapter(connectionString);
+var tree = new SparseMerkleTree(hashFunction, storage, storage, storage, storage);
+```
+
+See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for detailed guidelines, adapter patterns, and architectural constraints.
+
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please read our [Contributing Guide](docs/CONTRIBUTING.md) to understand our architecture constraints and design principles.
+
+**Quick summary:**
+- ✅ Core library defines interfaces only (storage-agnostic)
+- ✅ Reference implementations for testing (in-memory)
+- ❌ No direct database/blockchain dependencies in core
+- ❌ No cloud provider SDKs in core
+- 👉 Users implement adapters for their specific needs
+
+Please feel free to submit a Pull Request.
 
 ## License
 
