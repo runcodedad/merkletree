@@ -510,6 +510,8 @@ public sealed class SparseMerkleTree
         // The bit path is derived from the key's hash and specifies left/right at each tree level
         var bitPath = GetBitPath(key);
         var keyHash = HashKey(key);
+        // For traversal beyond Depth (extension nodes), we need the full 256-bit path
+        var fullBitPath = HashUtils.GetBitPath(keyHash, 256);
 
         // Step 2: Traverse the tree from root to leaf following the bit path
         // Allow traversal beyond Depth to support extension nodes (up to 256 bits max)
@@ -565,8 +567,8 @@ public sealed class SparseMerkleTree
                 
                 var internalNode = (SmtInternalNode)node;
                 // Follow bit path: false (0) = left child, true (1) = right child
-                // For levels beyond bitPath length, treat as false (go left)
-                bool goRight = level < bitPath.Length && bitPath[level];
+                // For levels beyond Depth, use the full bit path to support extension nodes
+                bool goRight = level < fullBitPath.Length && fullBitPath[level];
                 currentHash = goRight ? internalNode.RightHash : internalNode.LeftHash;
             }
             else
@@ -1057,8 +1059,9 @@ public sealed class SparseMerkleTree
                                 var rightHash = newKeyGoesRight ? extensionHash.ToArray() : traverseHash.ToArray();
                                 var divergeNode = CreateInternalNode(leftHash, rightHash);
                                 
-                                var extPath = new bool[Math.Min(extLevel + 1, bitPath.Length)];
-                                Array.Copy(bitPath, 0, extPath, 0, extPath.Length);
+                                // Extension nodes need path length = extLevel + 1
+                                var extPath = new bool[extLevel + 1];
+                                Array.Copy(newKeyFullBitPath, 0, extPath, 0, extPath.Length);
                                 nodesToPersist.Add(CreateNodeBlob(divergeNode, extPath));
                                 
                                 extensionHash = divergeNode.Hash;
@@ -1070,8 +1073,9 @@ public sealed class SparseMerkleTree
                                 var rightHash = newKeyGoesRight ? extensionHash.ToArray() : ZeroHashes[0].ToArray();
                                 var extNode = CreateInternalNode(leftHash, rightHash);
                                 
-                                var extPath = new bool[Math.Min(extLevel + 1, bitPath.Length)];
-                                Array.Copy(bitPath, 0, extPath, 0, extPath.Length);
+                                // Extension nodes need path length = extLevel + 1
+                                var extPath = new bool[extLevel + 1];
+                                Array.Copy(newKeyFullBitPath, 0, extPath, 0, extPath.Length);
                                 nodesToPersist.Add(CreateNodeBlob(extNode, extPath));
                                 
                                 extensionHash = extNode.Hash;
