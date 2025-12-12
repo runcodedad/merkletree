@@ -27,6 +27,60 @@ jobs:
     - name: Build
       run: dotnet build --no-restore --configuration Release
       
+    - name: Check for prohibited dependencies
+      run: |
+        echo "Checking for prohibited NuGet packages..."
+        
+        # Check for banned database packages
+        if dotnet list src/MerkleTree/MerkleTree.csproj package 2>/dev/null | grep -iE "EntityFrameworkCore|Dapper|System.Data.SqlClient|Npgsql|MongoDB.Driver|MySql.Data|SQLite"; then
+          echo "❌ ERROR: Prohibited database package detected in MerkleTree.csproj"
+          exit 1
+        fi
+        
+        # Check for banned blockchain packages
+        if dotnet list src/MerkleTree/MerkleTree.csproj package 2>/dev/null | grep -iE "Nethereum|NBitcoin|Solnet"; then
+          echo "❌ ERROR: Prohibited blockchain package detected in MerkleTree.csproj"
+          exit 1
+        fi
+        
+        # Check for banned cloud provider packages (except Azure.Core)
+        if dotnet list src/MerkleTree/MerkleTree.csproj package 2>/dev/null | grep -iE "AWSSDK\.|Microsoft.Azure.Cosmos|Azure.Storage|Azure.Data|Google.Cloud" | grep -v "Azure.Core"; then
+          echo "❌ ERROR: Prohibited cloud provider package detected in MerkleTree.csproj"
+          exit 1
+        fi
+        
+        echo "✅ No prohibited packages found"
+      
+    - name: Check for banned imports
+      run: |
+        echo "Checking for prohibited using directives in source files..."
+        
+        # Check for database-specific imports
+        if grep -r "using System\.Data\.SqlClient\|using System\.Data\.Common\|using Npgsql\|using MongoDB\.Driver\|using MongoDB\.Bson\|using MySql\.Data\|using Microsoft\.Data\.Sqlite" src/MerkleTree --include="*.cs" 2>/dev/null; then
+          echo "❌ ERROR: Prohibited database import found in source files"
+          exit 1
+        fi
+        
+        # Check for Entity Framework imports
+        if grep -r "using Microsoft\.EntityFrameworkCore\|using Dapper" src/MerkleTree --include="*.cs" 2>/dev/null; then
+          echo "❌ ERROR: Prohibited ORM import found in source files"
+          exit 1
+        fi
+        
+        # Check for blockchain-specific imports
+        if grep -r "using Nethereum\|using NBitcoin\|using Solnet" src/MerkleTree --include="*.cs" 2>/dev/null; then
+          echo "❌ ERROR: Prohibited blockchain import found in source files"
+          exit 1
+        fi
+        
+        # Check for cloud provider imports (except Azure.Core for abstractions)
+        if grep -r "using Amazon\|using Microsoft\.Azure\.Cosmos\|using Azure\.Storage\|using Azure\.Data\|using Google\.Cloud" src/MerkleTree --include="*.cs" 2>/dev/null; then
+          echo "❌ ERROR: Prohibited cloud provider import found in source files"
+          exit 1
+        fi
+        
+        echo "✅ No prohibited imports found"
+      
     - name: Run tests with coverage
       run: dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage" --results-directory ./coverage
       
