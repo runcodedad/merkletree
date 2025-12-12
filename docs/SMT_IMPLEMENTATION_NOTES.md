@@ -83,27 +83,36 @@ All failing tests involve retrieving values after insertion:
 - `BatchUpdateAsync_WithDeletes_AppliesCorrectly`
 - `BatchUpdateAsync_ConflictingUpdates_LastWriteWins`
 
-### Suspected Root Causes
+### Confirmed Root Cause
 
-1. **Zero Hash Indexing**: The mapping between tree levels and zero hash table indices may be incorrect
-   - Tree levels: 0 = root, (Depth-1) = near leaf
-   - Zero hash levels: 0 = empty leaf, Depth = empty tree root
-   - Current mapping: `siblings[level] = ZeroHashes[Depth - 1 - level]`
+**Issue**: Keys with shared bit-path prefixes cause tree corruption
 
-2. **Bit Path Consistency**: The bit path usage might be inconsistent between Get and Update
-   - GetAsync: Uses `bitPath[level]` at tree level `level`
-   - UpdatePathAsync: Uses `bitPath[level]` when building at tree level `level`
-   - Should be consistent, but needs verification
+**Example**:
+- Key 0: bit path `10101111` 
+- Key 1: bit path `10100001` 
+- They share the prefix `101000` (first 6 bits match)
+- After inserting both keys, Key 0 remains retrievable but Key 1 is not found
 
-3. **Serialization**: Node serialization/deserialization might lose information
-   - All hashes and data are preserved
-   - Format uses little-endian for cross-platform compatibility
-   - Needs isolated testing
+**Analysis**:
+When inserting Key 0 into an empty tree, internal nodes are created along its path with zero-hash siblings for empty branches. When inserting Key 1 which shares a prefix:
 
-4. **Tree Structure**: The reconstructed tree might not match expected structure
-   - Should create (Depth + 1) nodes: 1 leaf + Depth internal nodes
-   - Each internal node connects current subtree to sibling subtree
-   - Needs verification that all nodes are created correctly
+1. UpdatePathAsync traverses down following Key 1's bit path
+2. At the point where paths diverge (level 6 in example), it finds a zero-hash
+3. The algorithm treats this as an empty branch and creates new nodes
+4. However, Key 0's leaf exists deeper in the tree on a different branch
+5. The tree structure becomes inconsistent - Key 0's nodes still exist but are no longer reachable from the new root
+
+**The Core Problem**:
+The current implementation doesn't handle "tree splitting" when keys collide at a prefix level. In an SMT, when two keys share a prefix, the tree must be restructured to accommodate both leaves at their proper depths, with shared internal nodes for the common prefix and branching at the divergence point.
+
+**What Should Happen**:
+1. Detect when a new key's path intersects with an existing key's path
+2. Restructure the tree to push both leaves to their correct full-depth positions
+3. Create intermediate internal nodes connecting both branches
+4. Ensure all nodes along both paths are properly maintained
+
+**Current Behavior**:
+Lines 884-893 in UpdatePathAsync treat any non-internal node as terminal, filling remaining siblings with zero-hashes. This works for empty trees but fails when an existing structure needs reorganization.
 
 ## Next Steps for Debugging
 
