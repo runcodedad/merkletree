@@ -83,27 +83,57 @@ All failing tests involve retrieving values after insertion:
 - `BatchUpdateAsync_WithDeletes_AppliesCorrectly`
 - `BatchUpdateAsync_ConflictingUpdates_LastWriteWins`
 
-### Suspected Root Causes
+### Confirmed Root Cause: Depth-Limited Collision Handling
 
-1. **Zero Hash Indexing**: The mapping between tree levels and zero hash table indices may be incorrect
-   - Tree levels: 0 = root, (Depth-1) = near leaf
-   - Zero hash levels: 0 = empty leaf, Depth = empty tree root
-   - Current mapping: `siblings[level] = ZeroHashes[Depth - 1 - level]`
+**Critical Issue**: Keys with identical depth-bit prefixes cannot coexist in the tree
 
-2. **Bit Path Consistency**: The bit path usage might be inconsistent between Get and Update
-   - GetAsync: Uses `bitPath[level]` at tree level `level`
-   - UpdatePathAsync: Uses `bitPath[level]` when building at tree level `level`
-   - Should be consistent, but needs verification
+**The Fundamental Problem**:
+The current SMT implementation uses a fixed depth D and only creates D levels of internal nodes (levels 0 through D-1). When two keys have IDENTICAL bit paths through all D levels (same D-bit prefix), only the most recently inserted key remains accessible.
 
-3. **Serialization**: Node serialization/deserialization might lose information
-   - All hashes and data are preserved
-   - Format uses little-endian for cross-platform compatibility
-   - Needs isolated testing
+**Concrete Example**:
+- Tree depth: 8
+- Key 1: bit path `10100001 1111...` (first 8 bits)
+- Key 2: bit path `10100001 0111...` (SAME first 8 bits, diverges at bit 8)
+- After inserting Key 1: retrievable ✓
+- After inserting Key 2: Key 2 retrievable ✓, but Key 1 NOT retrievable ✗
 
-4. **Tree Structure**: The reconstructed tree might not match expected structure
-   - Should create (Depth + 1) nodes: 1 leaf + Depth internal nodes
-   - Each internal node connects current subtree to sibling subtree
-   - Needs verification that all nodes are created correctly
+**What Happens During Key 2 Insert**:
+1. Traversal follows the path `10100001` through levels 0-7
+2. At each level, both keys go the same direction (share all 8 bits)
+3. Siblings are collected correctly (zero-hashes since path matches)
+4. Reconstruction creates new internal nodes at levels 0-7
+5. At level 7, new node is created with children based on bit 7
+6. But both keys have the same bit 7! So level 7 node points to Key 2's leaf
+7. Key 1's leaf is still in storage but unreachable from new root
+
+**Why Immediate Retrieval Works**:
+Immediate retrieval after Key 2 insert works because the tree is freshly built for Key 2. But Key 1's path through the tree has been overwritten by Key 2's path.
+
+**Root Cause Analysis**:
+The implementation doesn't extend beyond depth D. When keys have paths that diverge at bit D or later, the tree structure can't accommodate both keys. Only D levels of internal nodes are created (0 through D-1), and leaves are conceptually at level D. Two keys with identical D-bit prefixes need to diverge at level D or deeper, but the tree doesn't create nodes that deep.
+
+**Current Behavior**:
+- Insert creates D internal nodes + 1 leaf (9 nodes for depth 8)
+- Each insert with the same D-bit prefix overwrites the previous tree path
+- Old leaves remain in storage but are orphaned (unreachable from new root)
+- Copy-on-write creates new nodes, but doesn't preserve paths for colliding prefixes
+
+**What Should Happen** (Standard SMT Design):
+1. When two keys have the same D-bit prefix, create internal nodes beyond level D-1
+2. Continue creating internal nodes until paths diverge
+3. Both leaves become children (directly or indirectly) of the divergence point
+4. Tree effectively has depth > D for certain branches
+
+**Alternative Solutions**:
+1. **Dynamic Depth Extension**: Allow tree to grow beyond configured depth when needed
+2. **Leaf Chaining**: At collision points, use a linked list or secondary structure
+3. **Deeper Tree**: Use larger fixed depth (e.g., 256 for SHA-256) to minimize collisions
+4. **Error on Collision**: Detect and reject keys with identical D-bit prefixes
+
+**Test Coverage**:
+- `SmtCollisionTest.TwoKeysWithIdenticalDepthBitPrefix_BothShouldBeRetrievable`: Demonstrates the bug
+- `SmtPropertyTests.Property_MultipleInserts_AllKeysRetrievable`: Fails due to this issue
+- `SmtDebugTest.Debug_FiveInserts_AllShouldBeRetrievable`: Shows Keys 1 & 2 collision
 
 ## Next Steps for Debugging
 
