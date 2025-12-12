@@ -881,10 +881,63 @@ public sealed class SparseMerkleTree
                     // Move to the child node indicated by the bit path
                     traverseHash = bitPath[level] ? internalNode.RightHash : internalNode.LeftHash;
                 }
+                else if (node.NodeType == SmtNodeType.Leaf)
+                {
+                    // Reached an existing leaf before expected depth
+                    // This indicates a key collision - two keys share a prefix
+                    // We need to determine where the paths diverge and set up siblings accordingly
+                    var existingLeaf = (SmtLeafNode)node;
+                    
+                    // Derive the bit path of the existing leaf from its key hash
+                    // In SMT, the key hash itself determines the path through the tree
+                    bool[] existingBitPath;
+                    if (existingLeaf.OriginalKey.HasValue && existingLeaf.OriginalKey.Value.Length > 0)
+                    {
+                        // If we have the original key, use it to compute the bit path
+                        existingBitPath = GetBitPath(existingLeaf.OriginalKey.Value.ToArray());
+                    }
+                    else
+                    {
+                        // Otherwise derive from the key hash (which is what determines the path anyway)
+                        existingBitPath = HashUtils.GetBitPath(existingLeaf.KeyHash.ToArray(), Depth);
+                    }
+                    
+                    // Find where the new key's path diverges from the existing leaf's path
+                    // We know they match up to 'level-1', now find where they differ
+                    int divergenceLevel = level;
+                    while (divergenceLevel < Depth && bitPath[divergenceLevel] == existingBitPath[divergenceLevel])
+                    {
+                        divergenceLevel++;
+                    }
+                    
+                    // Fill siblings for reconstruction:
+                    // - Levels from 'level' to 'divergenceLevel-1': paths match, sibling is zero-hash
+                    // - Level 'divergenceLevel': paths diverge, sibling is the existing leaf
+                    // - Levels after 'divergenceLevel': sibling is zero-hash
+                    
+                    for (int i = level; i < divergenceLevel && i < Depth; i++)
+                    {
+                        siblings[i] = ZeroHashes[Depth - 1 - i];
+                    }
+                    
+                    if (divergenceLevel < Depth)
+                    {
+                        // At divergence level, the existing leaf goes in the opposite direction
+                        // So it becomes the sibling for our path
+                        siblings[divergenceLevel] = traverseHash; // traverseHash is the existing leaf's hash
+                        
+                        // Fill remaining levels with zero-hashes
+                        for (int i = divergenceLevel + 1; i < Depth; i++)
+                        {
+                            siblings[i] = ZeroHashes[Depth - 1 - i];
+                        }
+                    }
+                    break;
+                }
                 else
                 {
-                    // Reached a leaf or empty node before expected depth
-                    // This happens when inserting into a sparse area - fill rest with zero-hashes
+                    // Reached an empty node before expected depth
+                    // Fill rest with zero-hashes
                     for (int i = level; i < Depth; i++)
                     {
                         siblings[i] = ZeroHashes[Depth - 1 - i];
