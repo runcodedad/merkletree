@@ -1,7 +1,7 @@
 ---
 name: dotnet-engineer
 description: Specialized C#/.NET software engineer for implementing features, fixing bugs, refactoring code, and writing tests
-tools: ['edit', 'search', 'runCommands', 'changes', 'testFailure', 'runTests']
+tools: ['edit', 'search', 'execute/getTerminalOutput', 'execute/runInTerminal', 'read/terminalLastCommand', 'read/terminalSelection', 'search/changes', 'execute/testFailure', 'execute/runTests']
 model: Claude Sonnet 4.5 (copilot)
 ---
 
